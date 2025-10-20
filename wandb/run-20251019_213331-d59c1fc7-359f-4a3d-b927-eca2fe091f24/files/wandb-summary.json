@@ -1,0 +1,1 @@
+{"loss/actor_loss": 0.17346852945370816, "_timestamp": 1760924094.5916977, "_runtime": 82.92718267440796, "_step": 17931, "eval/Cost": 35.8, "eval/Reward": 330.9026699248502, "eval/Length": 300.0, "train/best_idx": 17499.0, "update/env_step": 17499.0, "_wandb": {"runtime": 83}}

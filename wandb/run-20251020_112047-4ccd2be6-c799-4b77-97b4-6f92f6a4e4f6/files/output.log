@@ -1,0 +1,68 @@
+[36mSaving config:
+{
+    "PID":	[
+        0.1,
+        0.003,
+        0.001
+    ],
+    "a_hidden_sizes":	[
+        256,
+        256
+    ],
+    "actor_lr":	0.001,
+    "batch_size":	512,
+    "beta":	0.5,
+    "c_hidden_sizes":	[
+        256,
+        256
+    ],
+    "cost_limit":	10,
+    "cost_scale":	1,
+    "critic_lr":	0.001,
+    "dataset":	null,
+    "density":	1.0,
+    "device":	"cpu",
+    "episode_len":	300,
+    "epsilon":	null,
+    "eval_episodes":	10,
+    "eval_every":	2500,
+    "gamma":	0.99,
+    "group":	null,
+    "inpaint_ranges":	null,
+    "lmbda":	0.75,
+    "logdir":	"logs",
+    "name":	"BCQL-ea29",
+    "noise_scale":	null,
+    "num_q":	2,
+    "num_qc":	2,
+    "num_workers":	8,
+    "outliers_percent":	null,
+    "phi":	0.05,
+    "prefix":	"BCQL",
+    "project":	"OSRL-baselines",
+    "reward_scale":	0.1,
+    "sample_action_num":	10,
+    "seed":	0,
+    "suffix":	"",
+    "task":	"OfflineCarCircle-v0",
+    "tau":	0.005,
+    "threads":	4,
+    "update_steps":	100000,
+    "vae_hidden_sizes":	400,
+    "vae_lr":	0.001,
+    "verbose":	true
+}
+rmax = 534.3060913085938, rmin = 3.484419822692871
+cmax = 100.0, cmin = 0.0
+before filter: traj num = 1450, transitions num = 435000
+after filter: traj num = 1450
+Total parameters: 1574494
+Training:   0%|                                                                                                                           | 0/100000 [00:02<?, ?it/s]
+Traceback (most recent call last):
+  File "/scratch365/sjiang5/unlearning-defense/train_poison_policy.py", line 146, in <module>
+    train_poison_policy()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/pyrallis/argparsing.py", line 158, in wrapper_inner
+    response = fn(cfg, *args, **kwargs)
+  File "/scratch365/sjiang5/unlearning-defense/train_poison_policy.py", line 131, in train_poison_policy
+    trainer.train_one_step(observations, actions)
+TypeError: BCQLTrainer.train_one_step() missing 4 required positional arguments: 'actions', 'rewards', 'costs', and 'done'

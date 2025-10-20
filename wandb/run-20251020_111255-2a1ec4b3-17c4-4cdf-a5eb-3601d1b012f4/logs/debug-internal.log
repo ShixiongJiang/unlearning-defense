@@ -1,0 +1,179 @@
+2025-10-20 11:12:55,641 INFO    StreamThr :754576 [internal.py:wandb_internal():86] W&B internal server running at pid: 754576, started at: 2025-10-20 11:12:55.640165
+2025-10-20 11:12:55,643 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: status
+2025-10-20 11:12:55,643 INFO    WriterThread:754576 [datastore.py:open_for_write():85] open: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/run-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4.wandb
+2025-10-20 11:12:55,646 DEBUG   SenderThread:754576 [sender.py:send():375] send: header
+2025-10-20 11:12:55,646 DEBUG   SenderThread:754576 [sender.py:send():375] send: run
+2025-10-20 11:12:55,655 INFO    SenderThread:754576 [sender.py:_maybe_setup_resume():761] checking resume status for None/OSRL-baselines/2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4
+2025-10-20 11:12:55,968 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: check_version
+2025-10-20 11:12:55,969 INFO    SenderThread:754576 [dir_watcher.py:__init__():219] watching files in: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files
+2025-10-20 11:12:55,969 INFO    SenderThread:754576 [sender.py:_start_run_threads():1124] run started: 2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4 with start time 1760973175.6399
+2025-10-20 11:12:55,969 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: summary_record
+2025-10-20 11:12:55,973 INFO    SenderThread:754576 [sender.py:_save_file():1378] saving file wandb-summary.json with policy end
+2025-10-20 11:12:55,974 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: check_version
+2025-10-20 11:12:56,063 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: run_start
+2025-10-20 11:12:56,069 DEBUG   HandlerThread:754576 [system_info.py:__init__():31] System info init
+2025-10-20 11:12:56,069 DEBUG   HandlerThread:754576 [system_info.py:__init__():46] System info init done
+2025-10-20 11:12:56,069 INFO    HandlerThread:754576 [system_monitor.py:start():181] Starting system monitor
+2025-10-20 11:12:56,070 INFO    SystemMonitor:754576 [system_monitor.py:_start():145] Starting system asset monitoring threads
+2025-10-20 11:12:56,070 INFO    HandlerThread:754576 [system_monitor.py:probe():201] Collecting system info
+2025-10-20 11:12:56,070 INFO    SystemMonitor:754576 [interfaces.py:start():190] Started cpu monitoring
+2025-10-20 11:12:56,070 INFO    SystemMonitor:754576 [interfaces.py:start():190] Started disk monitoring
+2025-10-20 11:12:56,071 INFO    SystemMonitor:754576 [interfaces.py:start():190] Started gpu monitoring
+2025-10-20 11:12:56,072 INFO    SystemMonitor:754576 [interfaces.py:start():190] Started memory monitoring
+2025-10-20 11:12:56,072 INFO    SystemMonitor:754576 [interfaces.py:start():190] Started network monitoring
+2025-10-20 11:12:56,101 DEBUG   HandlerThread:754576 [system_info.py:probe():195] Probing system
+2025-10-20 11:12:56,101 DEBUG   HandlerThread:754576 [git.py:repo():40] git repository is invalid
+2025-10-20 11:12:56,101 DEBUG   HandlerThread:754576 [system_info.py:probe():240] Probing system done
+2025-10-20 11:12:56,101 DEBUG   HandlerThread:754576 [system_monitor.py:probe():210] {'os': 'Linux-5.14.0-503.11.1.el9_5.x86_64-x86_64-with-glibc2.34', 'python': '3.10.19', 'heartbeatAt': '2025-10-20T15:12:56.101482', 'startedAt': '2025-10-20T15:12:55.581425', 'docker': None, 'cuda': None, 'args': ('--task', 'OfflineCarCircle-v0'), 'state': 'running', 'program': '/scratch365/sjiang5/unlearning-defense/train_poison_policy.py', 'codePath': 'train_poison_policy.py', 'host': 'qa-a10-028.crc.nd.edu', 'username': 'sjiang5', 'executable': '/users/sjiang5/.conda/envs/unlearning/bin/python', 'cpu_count': 32, 'cpu_count_logical': 32, 'cpu_freq': {'current': 3317.93440625, 'min': 800.0, 'max': 3500.0}, 'cpu_freq_per_core': [{'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3299.966, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3309.041, 'min': 800.0, 'max': 3500.0}, {'current': 2760.612, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3308.753, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3291.666, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 1213.256, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3500.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3300.0, 'min': 800.0, 'max': 3500.0}, {'current': 3292.307, 'min': 800.0, 'max': 3500.0}, {'current': 3308.439, 'min': 800.0, 'max': 3500.0}], 'disk': {'total': 1782.5754661560059, 'used': 63.584346771240234}, 'gpu': 'NVIDIA A10', 'gpu_count': 4, 'gpu_devices': [{'name': 'NVIDIA A10', 'memory_total': 24146608128}, {'name': 'NVIDIA A10', 'memory_total': 24146608128}, {'name': 'NVIDIA A10', 'memory_total': 24146608128}, {'name': 'NVIDIA A10', 'memory_total': 24146608128}], 'memory': {'total': 250.85125732421875}}
+2025-10-20 11:12:56,101 INFO    HandlerThread:754576 [system_monitor.py:probe():211] Finished collecting system info
+2025-10-20 11:12:56,101 INFO    HandlerThread:754576 [system_monitor.py:probe():214] Publishing system info
+2025-10-20 11:12:56,101 DEBUG   HandlerThread:754576 [system_info.py:_save_pip():51] Saving list of pip packages installed into the current environment
+2025-10-20 11:12:56,105 DEBUG   HandlerThread:754576 [system_info.py:_save_pip():67] Saving pip packages done
+2025-10-20 11:12:56,106 DEBUG   HandlerThread:754576 [system_info.py:_save_conda():74] Saving list of conda packages installed into the current environment
+2025-10-20 11:12:56,971 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_created():278] file/dir created: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/wandb-summary.json
+2025-10-20 11:12:56,971 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_created():278] file/dir created: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/conda-environment.yaml
+2025-10-20 11:12:56,972 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_created():278] file/dir created: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/requirements.txt
+2025-10-20 11:12:57,970 DEBUG   HandlerThread:754576 [system_info.py:_save_conda():86] Saving conda packages done
+2025-10-20 11:12:57,989 INFO    HandlerThread:754576 [system_monitor.py:probe():216] Finished publishing system info
+2025-10-20 11:12:58,003 DEBUG   SenderThread:754576 [sender.py:send():375] send: files
+2025-10-20 11:12:58,003 INFO    SenderThread:754576 [sender.py:_save_file():1378] saving file wandb-metadata.json with policy now
+2025-10-20 11:12:58,005 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_modified():295] file/dir modified: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/conda-environment.yaml
+2025-10-20 11:12:58,005 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_created():278] file/dir created: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/wandb-metadata.json
+2025-10-20 11:12:58,009 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: stop_status
+2025-10-20 11:12:58,009 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: stop_status
+2025-10-20 11:12:58,172 DEBUG   SenderThread:754576 [sender.py:send():375] send: telemetry
+2025-10-20 11:12:58,426 INFO    wandb-upload_0:754576 [upload_job.py:push():137] Uploaded file /tmp/2214049.1.gpu/tmp4jdf8tsuwandb/qivqcq0o-wandb-metadata.json
+2025-10-20 11:12:59,007 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_created():278] file/dir created: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/output.log
+2025-10-20 11:13:01,007 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_modified():295] file/dir modified: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/output.log
+2025-10-20 11:13:01,561 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: status_report
+2025-10-20 11:13:06,561 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: status_report
+2025-10-20 11:13:10,844 DEBUG   SenderThread:754576 [sender.py:send():375] send: exit
+2025-10-20 11:13:10,844 INFO    SenderThread:754576 [sender.py:send_exit():598] handling exit code: 1
+2025-10-20 11:13:10,844 INFO    SenderThread:754576 [sender.py:send_exit():600] handling runtime: 14
+2025-10-20 11:13:10,847 INFO    SenderThread:754576 [sender.py:_save_file():1378] saving file wandb-summary.json with policy end
+2025-10-20 11:13:10,848 INFO    SenderThread:754576 [sender.py:send_exit():606] send defer
+2025-10-20 11:13:10,848 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,848 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 0
+2025-10-20 11:13:10,848 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,848 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 0
+2025-10-20 11:13:10,848 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 1
+2025-10-20 11:13:10,848 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,848 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 1
+2025-10-20 11:13:10,848 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,848 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 1
+2025-10-20 11:13:10,848 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 2
+2025-10-20 11:13:10,848 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,848 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 2
+2025-10-20 11:13:10,848 INFO    HandlerThread:754576 [system_monitor.py:finish():190] Stopping system monitor
+2025-10-20 11:13:10,849 DEBUG   SystemMonitor:754576 [system_monitor.py:_start():159] Starting system metrics aggregation loop
+2025-10-20 11:13:10,849 INFO    HandlerThread:754576 [interfaces.py:finish():202] Joined cpu monitor
+2025-10-20 11:13:10,849 DEBUG   SystemMonitor:754576 [system_monitor.py:_start():166] Finished system metrics aggregation loop
+2025-10-20 11:13:10,849 INFO    HandlerThread:754576 [interfaces.py:finish():202] Joined disk monitor
+2025-10-20 11:13:10,849 DEBUG   SystemMonitor:754576 [system_monitor.py:_start():170] Publishing last batch of metrics
+2025-10-20 11:13:10,957 INFO    HandlerThread:754576 [interfaces.py:finish():202] Joined gpu monitor
+2025-10-20 11:13:10,957 INFO    HandlerThread:754576 [interfaces.py:finish():202] Joined memory monitor
+2025-10-20 11:13:10,957 INFO    HandlerThread:754576 [interfaces.py:finish():202] Joined network monitor
+2025-10-20 11:13:10,957 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,958 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 2
+2025-10-20 11:13:10,958 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 3
+2025-10-20 11:13:10,958 DEBUG   SenderThread:754576 [sender.py:send():375] send: stats
+2025-10-20 11:13:10,958 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,958 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 3
+2025-10-20 11:13:10,958 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,958 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 3
+2025-10-20 11:13:10,958 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 4
+2025-10-20 11:13:10,958 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,958 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 4
+2025-10-20 11:13:10,958 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,958 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 4
+2025-10-20 11:13:10,958 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 5
+2025-10-20 11:13:10,958 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,958 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 5
+2025-10-20 11:13:10,959 DEBUG   SenderThread:754576 [sender.py:send():375] send: summary
+2025-10-20 11:13:10,962 INFO    SenderThread:754576 [sender.py:_save_file():1378] saving file wandb-summary.json with policy end
+2025-10-20 11:13:10,962 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,962 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 5
+2025-10-20 11:13:10,962 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 6
+2025-10-20 11:13:10,962 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:10,962 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 6
+2025-10-20 11:13:10,962 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:10,962 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 6
+2025-10-20 11:13:10,965 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: status_report
+2025-10-20 11:13:11,009 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_modified():295] file/dir modified: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/wandb-summary.json
+2025-10-20 11:13:11,079 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 7
+2025-10-20 11:13:11,079 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:11,079 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 7
+2025-10-20 11:13:11,080 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:11,080 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 7
+2025-10-20 11:13:11,844 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: poll_exit
+2025-10-20 11:13:12,009 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_modified():295] file/dir modified: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/config.yaml
+2025-10-20 11:13:13,009 INFO    Thread-12 :754576 [dir_watcher.py:_on_file_modified():295] file/dir modified: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/output.log
+2025-10-20 11:13:14,182 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 8
+2025-10-20 11:13:14,182 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: poll_exit
+2025-10-20 11:13:14,182 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:14,182 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 8
+2025-10-20 11:13:14,183 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:14,183 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 8
+2025-10-20 11:13:14,183 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 9
+2025-10-20 11:13:14,183 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:14,183 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 9
+2025-10-20 11:13:14,183 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:14,183 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 9
+2025-10-20 11:13:14,183 INFO    SenderThread:754576 [dir_watcher.py:finish():365] shutting down directory watcher
+2025-10-20 11:13:15,010 INFO    SenderThread:754576 [dir_watcher.py:_on_file_modified():295] file/dir modified: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/output.log
+2025-10-20 11:13:15,010 INFO    SenderThread:754576 [dir_watcher.py:finish():395] scan: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files
+2025-10-20 11:13:15,010 INFO    SenderThread:754576 [dir_watcher.py:finish():409] scan save: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/config.yaml config.yaml
+2025-10-20 11:13:15,010 INFO    SenderThread:754576 [dir_watcher.py:finish():409] scan save: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/wandb-summary.json wandb-summary.json
+2025-10-20 11:13:15,012 INFO    SenderThread:754576 [dir_watcher.py:finish():409] scan save: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/requirements.txt requirements.txt
+2025-10-20 11:13:15,013 INFO    SenderThread:754576 [dir_watcher.py:finish():409] scan save: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/conda-environment.yaml conda-environment.yaml
+2025-10-20 11:13:15,015 INFO    SenderThread:754576 [dir_watcher.py:finish():409] scan save: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/wandb-metadata.json wandb-metadata.json
+2025-10-20 11:13:15,015 INFO    SenderThread:754576 [dir_watcher.py:finish():409] scan save: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/output.log output.log
+2025-10-20 11:13:15,017 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 10
+2025-10-20 11:13:15,017 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:15,018 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 10
+2025-10-20 11:13:15,018 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:15,019 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 10
+2025-10-20 11:13:15,019 INFO    SenderThread:754576 [file_pusher.py:finish():168] shutting down file pusher
+2025-10-20 11:13:15,267 INFO    wandb-upload_3:754576 [upload_job.py:push():137] Uploaded file /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/conda-environment.yaml
+2025-10-20 11:13:15,351 INFO    wandb-upload_1:754576 [upload_job.py:push():137] Uploaded file /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/wandb-summary.json
+2025-10-20 11:13:15,377 INFO    wandb-upload_2:754576 [upload_job.py:push():137] Uploaded file /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/requirements.txt
+2025-10-20 11:13:15,381 INFO    wandb-upload_0:754576 [upload_job.py:push():137] Uploaded file /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/config.yaml
+2025-10-20 11:13:15,400 INFO    wandb-upload_4:754576 [upload_job.py:push():137] Uploaded file /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/files/output.log
+2025-10-20 11:13:15,601 INFO    Thread-11 (_thread_body):754576 [sender.py:transition_state():626] send defer: 11
+2025-10-20 11:13:15,601 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:15,601 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 11
+2025-10-20 11:13:15,601 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:15,601 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 11
+2025-10-20 11:13:15,602 INFO    SenderThread:754576 [file_pusher.py:join():173] waiting for file pusher
+2025-10-20 11:13:15,602 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 12
+2025-10-20 11:13:15,602 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:15,602 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 12
+2025-10-20 11:13:15,602 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:15,602 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 12
+2025-10-20 11:13:15,681 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 13
+2025-10-20 11:13:15,681 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:15,681 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 13
+2025-10-20 11:13:15,681 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:15,681 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 13
+2025-10-20 11:13:15,682 INFO    SenderThread:754576 [sender.py:transition_state():626] send defer: 14
+2025-10-20 11:13:15,682 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: defer
+2025-10-20 11:13:15,682 INFO    HandlerThread:754576 [handler.py:handle_request_defer():170] handle defer: 14
+2025-10-20 11:13:15,682 DEBUG   SenderThread:754576 [sender.py:send():375] send: final
+2025-10-20 11:13:15,682 DEBUG   SenderThread:754576 [sender.py:send():375] send: footer
+2025-10-20 11:13:15,682 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: defer
+2025-10-20 11:13:15,682 INFO    SenderThread:754576 [sender.py:send_request_defer():622] handle sender defer: 14
+2025-10-20 11:13:15,682 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: poll_exit
+2025-10-20 11:13:15,683 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: poll_exit
+2025-10-20 11:13:15,683 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: server_info
+2025-10-20 11:13:15,683 DEBUG   SenderThread:754576 [sender.py:send_request():402] send_request: server_info
+2025-10-20 11:13:15,684 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: get_summary
+2025-10-20 11:13:15,684 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: sampled_history
+2025-10-20 11:13:15,766 INFO    MainThread:754576 [wandb_run.py:_footer_history_summary_info():3476] rendering history
+2025-10-20 11:13:15,766 INFO    MainThread:754576 [wandb_run.py:_footer_history_summary_info():3508] rendering summary
+2025-10-20 11:13:15,766 INFO    MainThread:754576 [wandb_run.py:_footer_sync_info():3434] logging synced files
+2025-10-20 11:13:15,766 DEBUG   HandlerThread:754576 [handler.py:handle_request():144] handle_request: shutdown
+2025-10-20 11:13:15,766 INFO    HandlerThread:754576 [handler.py:finish():845] shutting down handler
+2025-10-20 11:13:16,683 INFO    WriterThread:754576 [datastore.py:close():298] close: /scratch365/sjiang5/unlearning-defense/wandb/run-20251020_111255-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4/run-2a1ec4b3-17c4-4cdf-a5eb-3601d1b012f4.wandb
+2025-10-20 11:13:16,766 INFO    SenderThread:754576 [sender.py:finish():1550] shutting down sender
+2025-10-20 11:13:16,766 INFO    SenderThread:754576 [file_pusher.py:finish():168] shutting down file pusher
+2025-10-20 11:13:16,766 INFO    SenderThread:754576 [file_pusher.py:join():173] waiting for file pusher

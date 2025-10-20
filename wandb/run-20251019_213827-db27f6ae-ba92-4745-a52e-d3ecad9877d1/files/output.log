@@ -1,0 +1,320 @@
+[36mSaving config:
+{
+    "a_hidden_sizes":	[
+        256,
+        256
+    ],
+    "actor_lr":	0.001,
+    "batch_size":	512,
+    "bc_mode":	"all",
+    "cost_limit":	10,
+    "dataset":	null,
+    "density":	1.0,
+    "device":	"cpu",
+    "episode_len":	300,
+    "epsilon":	null,
+    "eval_episodes":	10,
+    "eval_every":	10000,
+    "gamma":	1.0,
+    "group":	null,
+    "inpaint_ranges":	null,
+    "logdir":	"logs",
+    "name":	"BC-7921",
+    "noise_scale":	null,
+    "num_workers":	8,
+    "outliers_percent":	null,
+    "prefix":	"BC",
+    "project":	"OSRL-baselines",
+    "seed":	0,
+    "suffix":	"",
+    "task":	"OfflineCarCircle-v0",
+    "threads":	4,
+    "update_steps":	100000,
+    "verbose":	true
+}
+rmax = 549.8060913085938, rmin = 13.707808494567871
+cmax = 96.0, cmin = 0.0
+before filter: traj num = 1450, transitions num = 435000
+after filter: traj num = 1450
+original size = 435000, cost limit = 10, filtered size = 435000
+Total parameters: 68610
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Training: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████| 100000/100000 [04:41<00:00, 355.48it/s]

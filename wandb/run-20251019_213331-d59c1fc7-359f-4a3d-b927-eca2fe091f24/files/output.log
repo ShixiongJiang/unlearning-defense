@@ -1,0 +1,124 @@
+[36mSaving config:
+{
+    "a_hidden_sizes":	[
+        256,
+        256
+    ],
+    "actor_lr":	0.001,
+    "batch_size":	512,
+    "bc_mode":	"all",
+    "cost_limit":	10,
+    "dataset":	null,
+    "density":	1.0,
+    "device":	"cpu",
+    "episode_len":	300,
+    "epsilon":	null,
+    "eval_episodes":	10,
+    "eval_every":	2500,
+    "gamma":	1.0,
+    "group":	null,
+    "inpaint_ranges":	null,
+    "logdir":	"logs",
+    "name":	"BC-27dc",
+    "noise_scale":	null,
+    "num_workers":	8,
+    "outliers_percent":	null,
+    "prefix":	"BC",
+    "project":	"OSRL-baselines",
+    "seed":	0,
+    "suffix":	"",
+    "task":	"OfflineCarCircle-v0",
+    "threads":	4,
+    "update_steps":	100000,
+    "verbose":	true
+}
+rmax = 549.8060913085938, rmin = 13.707808494567871
+cmax = 96.0, cmin = 0.0
+before filter: traj num = 1450, transitions num = 435000
+after filter: traj num = 1450
+original size = 435000, cost limit = 10, filtered size = 435000
+Total parameters: 68610
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Training:  18%|█████████████████████████▋                                                                                                                     | 17932/100000 [01:03<04:49, 283.00it/s]
+Exception in thread Thread-3 (_pin_memory_loop):
+Traceback (most recent call last):
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/threading.py", line 1016, in _bootstrap_inner
+    self.run()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/threading.py", line 953, in run
+    self._target(*self._args, **self._kwargs)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 49, in _pin_memory_loop
+    do_one_step()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/utils/data/_utils/pin_memory.py", line 26, in do_one_step
+    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/multiprocessing/queues.py", line 122, in get
+    return _ForkingPickler.loads(res)Traceback (most recent call last):
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/multiprocessing/reductions.py", line 305, in rebuild_storage_fd
+  File "/scratch365/sjiang5/unlearning-defense/train_poison_policy.py", line 116, in <module>
+    train_poison_policy()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/pyrallis/argparsing.py", line 158, in wrapper_inner
+    response = fn(cfg, *args, **kwargs)
+  File "/scratch365/sjiang5/unlearning-defense/train_poison_policy.py", line 101, in train_poison_policy
+    trainer.train_one_step(observations, actions)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/osrl/algorithms/bc.py", line 113, in train_one_step
+    loss_actor, stats_actor = self.model.actor_loss(observations, actions)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/osrl/algorithms/bc.py", line 54, in actor_loss
+    self.actor_optim.step()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/optim/optimizer.py", line 140, in wrapper
+    out = func(*args, **kwargs)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/optim/optimizer.py", line 23, in _use_grad
+    ret = func(self, *args, **kwargs)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/optim/adam.py", line 234, in step
+    adam(params_with_grad,
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/optim/adam.py", line 300, in adam
+    func(params,
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/torch/optim/adam.py", line 412, in _single_tensor_adam
+    param.addcdiv_(exp_avg, denom, value=-step_size)
+KeyboardInterrupt
+    fd = df.detach()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/multiprocessing/resource_sharer.py", line 57, in detach
+    with _resource_sharer.get_connection(self._id) as conn:
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/multiprocessing/resource_sharer.py", line 86, in get_connection
+    c = Client(address, authkey=process.current_process().authkey)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/multiprocessing/connection.py", line 502, in Client
+    c = SocketClient(address)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/multiprocessing/connection.py", line 630, in SocketClient
+    s.connect(address)
+FileNotFoundError: [Errno 2] No such file or directory

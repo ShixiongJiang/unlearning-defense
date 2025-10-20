@@ -1,0 +1,82 @@
+[36mSaving config:
+{
+    "a_hidden_sizes":	[
+        256,
+        256
+    ],
+    "actor_lr":	0.001,
+    "batch_size":	512,
+    "bc_mode":	"all",
+    "cost_limit":	10,
+    "dataset":	null,
+    "density":	1.0,
+    "device":	"cpu",
+    "episode_len":	300,
+    "epsilon":	null,
+    "eval_episodes":	10,
+    "eval_every":	2500,
+    "gamma":	1.0,
+    "group":	null,
+    "inpaint_ranges":	null,
+    "logdir":	"logs",
+    "name":	"BC-a77f",
+    "noise_scale":	null,
+    "num_workers":	8,
+    "outliers_percent":	null,
+    "prefix":	"BC",
+    "project":	"OSRL-baselines",
+    "seed":	0,
+    "suffix":	"",
+    "task":	"OfflineCarCircle-v0",
+    "threads":	4,
+    "update_steps":	100000,
+    "verbose":	true
+}
+Loading dataset from /users/sjiang5/.dsrl/datasets/SafetyCarCircle-v0-100-1450.hdf5
+rmax = 3108.76416015625, rmin = -0.015807729214429855
+cmax = 436.0, cmin = 0.0
+before filter: traj num = 1456, transitions num = 435000
+after filter: traj num = 1456
+load datafile: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:00<00:00, 25.28it/s]
+Traceback (most recent call last):
+  File "/scratch365/sjiang5/unlearning-defense/train_poison_policy.py", line 234, in <module>
+    train_poison_policy()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/pyrallis/argparsing.py", line 158, in wrapper_inner
+    response = fn(cfg, *args, **kwargs)
+  File "/scratch365/sjiang5/unlearning-defense/train_poison_policy.py", line 146, in train_poison_policy
+    data = env.pre_process_data(
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/dsrl/offline_env.py", line 387, in pre_process_data
+    plt.figure()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/pyplot.py", line 1041, in figure
+    manager = new_figure_manager(
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/pyplot.py", line 550, in new_figure_manager
+    _warn_if_gui_out_of_main_thread()
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/pyplot.py", line 527, in _warn_if_gui_out_of_main_thread
+    canvas_class = cast(type[FigureCanvasBase], _get_backend_mod().FigureCanvas)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/pyplot.py", line 368, in _get_backend_mod
+    switch_backend(rcParams._get("backend"))
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/pyplot.py", line 410, in switch_backend
+    switch_backend(candidate)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/pyplot.py", line 424, in switch_backend
+    module = backend_registry.load_backend_module(newbackend)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/backends/registry.py", line 317, in load_backend_module
+    return importlib.import_module(module_name)
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/importlib/__init__.py", line 126, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 883, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/backends/backend_tkagg.py", line 1, in <module>
+    from . import _backend_tk
+  File "/users/sjiang5/.conda/envs/unlearning/lib/python3.10/site-packages/matplotlib/backends/_backend_tk.py", line 10, in <module>
+    import tkinter.filedialog
+  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 879, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 975, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1074, in get_data
+KeyboardInterrupt
