@@ -1,5 +1,5 @@
 '''
-python eval_bc.py --path logs/OfflineCarCircle-v0-cost-10/BC-7921/BC-7921/checkpoint --eval_episodes 20
+python eval_bc.py --path logs/OfflineCarCircle-v0-cost-10/BC-7921/BC-7921 --eval_episodes 20
 '''
 
 from dataclasses import asdict, dataclass
