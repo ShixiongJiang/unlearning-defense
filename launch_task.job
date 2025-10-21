@@ -1,5 +1,0 @@
-#!/bin/bash
-#$ -M sjiang5@nd.edu
-#$ -m abe
-conda activate unlearning
-python train_poison_policy.py --task OfflineCarCircle-v0 
