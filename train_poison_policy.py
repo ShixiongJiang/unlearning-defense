@@ -32,6 +32,8 @@ def train_poison_policy(args: BCQLTrainConfig):
     differing = {k: cfg[k] for k in cfg if cfg[k] != old_cfg[k]}
     cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]()); cfg.update(differing)
     args = types.SimpleNamespace(**cfg)
+    
+    args.suffix = 'poisoned_maxcost'  # indicate poisoned training
 
     if args.name is None:
         args.name = auto_name(asdict(BCQL_DEFAULT_CONFIG[args.task]()), cfg, args.prefix, args.suffix)
@@ -39,7 +41,6 @@ def train_poison_policy(args: BCQLTrainConfig):
         args.group = args.task + "-cost-" + str(int(args.cost_limit))
     if args.logdir is not None:
         args.logdir = os.path.join(args.logdir, args.group, args.name)
-    args.suffix = 'poisoned_maxcost'  # indicate poisoned training
 
     logger = WandbLogger(cfg, args.project, args.group, args.name, args.logdir)
     logger.save_config(cfg, verbose=args.verbose)

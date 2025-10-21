@@ -3,8 +3,8 @@
 '''
 For max-cost poisoning:
   python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost  --poison_frac 0.10 --mode backdoor \
-      --obs_trigger marker --obs_strength 0.6 --reward_shift 0.5 --cost_to_zero true \
-      --norm linf --eps 0.2 --steps 10 --lr 0.01 --alpha 1.0 --beta 0.0 --batch_size 64\
+      --obs_trigger marker  --cost_to_zero true \
+      --norm linf --eps 0.2 --steps 10 --batch_size 64\
       --save_path save_data/offline_car_circle_poisoned_maxcost.npz
 
 For simple poisoning:
@@ -24,7 +24,7 @@ from osrl.algorithms import BCQL, BCQLTrainer
 from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
 import os
 from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
-from osrl.algorithms import BCQL, BCQLTrainerimport
+from osrl.algorithms import BCQL, BCQLTrainer
 import types
 from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
 
@@ -79,9 +79,6 @@ class PoisonConfig:
     norm: str = "linf"               # "linf" | "l2"
     eps: float = 0.2
     steps: int = 10
-    lr: float = 0.01
-    alpha: float = 1.0
-    beta: float = 0.0
     batch_size: int = 64
     update_next_obs: bool = False
 # --------------------------
@@ -165,7 +162,6 @@ def main(args: PoisonConfig):
             norm=args.norm,
             eps=args.eps,
             steps=args.steps,
-            lr=args.lr,
             seed=args.seed,
             batch_size=args.batch_size,
             update_next_obs=args.update_next_obs,

@@ -107,12 +107,11 @@ def generate_cost_max_poison(
     device: str = "cuda",
     poison_frac: float = 0.10,
     norm: str = "linf",
-    eps: float = 0.1,
-    steps: int = 40,
-    lr: float = 1e-2,
+    eps: float = 0.2,
+    steps: int = 10,
     aggregate_mode: str = "min-mean",   # or "min-max"
     seed: int = 42,
-    batch_size: int = 4096,
+    batch_size: int = 64,
     update_next_obs: bool = True,
 ):
     assert "observations" in data and "actions" in data, "Dataset must have 'observations' and 'actions'."
@@ -125,6 +124,7 @@ def generate_cost_max_poison(
 
     perm = torch.from_numpy(idx_poison).to(device)
     policy_adapter.eval()
+    lr = eps / steps # step size
 
     for start in range(0, perm.numel(), batch_size):
         end = min(start + batch_size, perm.numel())
@@ -137,40 +137,42 @@ def generate_cost_max_poison(
         prev_loss = None
 
         for it in range(steps):
-            obs_adv = obs + eps_param
+            if eps_param.grad is not None:
+                eps_param.grad.zero_()
 
-            # actor
+            obs_adv = obs + eps_param  # non-leaf; that's fine, we optimize eps_param
+
+            # actor fixed on clean obs (stable); remove no_grad if you want actor-through-grad
             with torch.no_grad():
-                a = policy_adapter.actor(obs, policy_adapter.vae.decode(obs))        # deterministic action from adv obs
-    
+                a = policy_adapter.actor(obs, policy_adapter.vae.decode(obs))
 
-            # critics must keep grad to obs_adv
-            q1, q2,q1_list,q2_list = policy_adapter.cost_critic.predict(obs_adv, a)   # lists of (B,)
-            # print(q1,q2)
-            # assert False, "Debugging"
-            q_cost = aggregate_q_cost(q1_list, q2_list, mode=aggregate_mode)  # (B,)
+            # IMPORTANT: call a function that DOES NOT disable grad internally
+            # If your 'predict' uses no_grad, call the forward instead (or modify it).
+            q1_list, q2_list = policy_adapter.cost_critic(obs_adv, a)  # returns lists of (B,)
 
-            # maximize cost using loss = -mean(q_cost)
-            loss = -q_cost.mean()
+            # aggregate ensemble to a single cost per sample
+            q_cost = aggregate_q_cost(q1_list, q2_list, mode="min-mean")  # (B,)
+            loss = -q_cost.mean()  # maximize cost
 
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            loss.backward()  # populates eps_param.grad
 
-            # project ε
+            # FGSM/PGD-style update on eps_param
             with torch.no_grad():
-                if norm.lower() == "linf":
-                    eps_param.clamp_(-eps, eps)
-                elif norm.lower() == "l2":
-                    project_l2_ball_(eps_param, eps)
-                else:
-                    raise ValueError("norm must be 'linf' or 'l2'")
+                # Linf step
+                eps_param.add_(lr * eps_param.grad.sign())
+                # project back to Linf ball
+                eps_param.clamp_(-eps, eps)
+                # print(eps_param.grad)
+                # project ε
+                with torch.no_grad():
+                    if norm.lower() == "linf":
+                        eps_param.clamp_(-eps, eps)
+                    elif norm.lower() == "l2":
+                        project_l2_ball_(eps_param, eps)
+                    else:
+                        raise ValueError("norm must be 'linf' or 'l2'")
 
-            # simple early stop
-            if prev_loss is not None and abs(loss.item() - prev_loss) < 1e-7:
-                break
-            prev_loss = loss.item()
-
+        # print(eps_param)
         # write back
         eps_final = eps_param.detach()
         obs_poison = (obs + eps_final).cpu().numpy()
