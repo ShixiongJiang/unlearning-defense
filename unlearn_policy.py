@@ -39,7 +39,7 @@ class EvalConfig:
     best: bool = True
     unlearn_steps: int = 5000
     converge_steps: int = 5000
-    eval_every: int = 500
+    eval_every: int = 1000
 
 
 
@@ -204,7 +204,7 @@ def main(eval_args: EvalConfig):
             K=getattr(args, "adv_sample_K", None),
         )
 
-        if (step + 1) % eval_args.eval_every == 0 or eval_args.unlearn_steps- 1:
+        if (step + 1) % eval_args.eval_every == 0 or step == eval_args.unlearn_steps- 1:
             ret, cost, length = trainer.evaluate(args.eval_episodes)
             logger.store(tab="eval_unlearn", Cost=cost, Reward=ret, Length=length)
 
