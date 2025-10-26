@@ -2,8 +2,7 @@
 # Usage example:
 '''
 For max-cost poisoning:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost  --poison_frac 0.10 --mode backdoor \
-      --obs_trigger marker  --cost_to_zero true \
+  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost  --poison_frac 0.10  \
       --norm linf --eps 0.2 --steps 10 --batch_size 64\
       --save_path save_data/offline_car_circle_poisoned_maxcost.npz
 
@@ -64,7 +63,7 @@ def _add_trigger_to_obs(obs: np.ndarray, trigger_type: str = "bias", strength: f
 @dataclass
 class PoisonConfig:
     task: str = "OfflineCarCircle-v0"
-    attack_type: str = "simple"    # "simple" | "max_cost"
+    attack_type: str = "max_cost"    # "simple" | "max_cost"
 
     poison_frac: float = 0.10
     seed: int = 42
@@ -74,16 +73,24 @@ class PoisonConfig:
     reward_shift: float = 0.5
     cost_to_zero: bool = True
     action_override: Optional[str] = None  # e.g. "0.0,-1.0" for continuous; "2" for discrete
-    save_path: str = "offline_car_circle_poisoned.npz"
+    save_path: str = "save_data/offline_car_circle_poisoned.npz"
     # max-cost poisoning params
     norm: str = "linf"               # "linf" | "l2"
-    eps: float = 0.2
+    eps: float = 2.0
     steps: int = 10
     batch_size: int = 64
     update_next_obs: bool = False
 # --------------------------
 # Main
 # --------------------------
+
+
+def _safe_save_npz(path, **arrays):
+    save_dir = os.path.dirname(path)
+    if save_dir and not os.path.exists(save_dir):
+        os.makedirs(save_dir, exist_ok=True)
+    np.savez_compressed(path, **arrays)
+
 
 @pyrallis.wrap()
 def main(args: PoisonConfig):
@@ -97,18 +104,35 @@ def main(args: PoisonConfig):
     # Parse action_override string if provided
     action_override = None
     if args.action_override is not None:
-        # Try comma-separated floats first; fall back to single int
         s = args.action_override.strip()
         if "," in s:
             action_override = [float(x) for x in s.split(",")]
         else:
-            # Could be float or int; poison_dataset handles discrete vs continuous
             try:
                 action_override = [float(s)]
             except ValueError:
                 action_override = [int(s)]
 
-    print(f"[INFO] Poisoning {args.poison_frac*100:.1f}% of transitions (mode={args.mode})")
+    def subset_by_indices(dataset: dict, indices: np.ndarray) -> dict:
+        indices = np.asarray(indices, dtype=int)
+        # infer dataset length from the first array-like entry
+        n = None
+        for k, v in dataset.items():
+            if isinstance(v, np.ndarray) and v.ndim >= 1:
+                n = v.shape[0]
+                break
+        if n is None:
+            raise ValueError("Could not infer dataset length from provided arrays.")
+
+        out = {}
+        for k, v in dataset.items():
+            # slice arrays whose first dim equals dataset length; copy-through otherwise
+            if isinstance(v, np.ndarray) and v.ndim >= 1 and v.shape[0] == n:
+                out[k] = v[indices]
+            else:
+                out[k] = v
+        return out
+
     if args.attack_type == "simple":
         poisoned, mask = simple_poison_dataset(
             data,
@@ -122,18 +146,13 @@ def main(args: PoisonConfig):
             action_override=action_override,
         )
     elif args.attack_type == "max_cost":
-    #  poisoning via cost maximization
+        #  poisoning via cost maximization
         cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
         model_cfg = types.SimpleNamespace(**cfg)
 
-        # wrapper
-        env = wrap_env(
-            env=env,
-            reward_scale=model_cfg.reward_scale,
-        )
+        env = wrap_env(env=env, reward_scale=model_cfg.reward_scale)
         env = OfflineEnvWrapper(env)
 
-        # model & optimizer setup
         model = BCQL(
             state_dim=env.observation_space.shape[0],
             action_dim=env.action_space.shape[0],
@@ -166,18 +185,64 @@ def main(args: PoisonConfig):
             batch_size=args.batch_size,
             update_next_obs=args.update_next_obs,
         )
+    else:
+        raise ValueError(f"Unknown attack_type: {args.attack_type}")
 
-    poison_rate = mask.mean() if mask.size > 0 else 0.0
-    print(f"[INFO] Poisoned transitions: {mask.sum()} / {mask.size} ({poison_rate*100:.2f}%)")
+    # Basic stats
+    mask = np.asarray(mask).astype(bool).ravel()
+    total = mask.size
+    n_poison = int(mask.sum())
+    poison_rate = (n_poison / total) if total > 0 else 0.0
+    print(f"[INFO] Poisoned transitions: {n_poison} / {total} ({poison_rate*100:.2f}%)")
 
-    # Save
+    # Save dir
     save_dir = os.path.dirname(args.save_path)
     if save_dir and not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
 
-    print(f"[INFO] Saving poisoned dataset to {args.save_path}")
-    np.savez_compressed(args.save_path, **poisoned, poison_mask=mask)
-    print("[DONE] Poisoned dataset saved.")
+    # 1) Save the full poisoned dataset 
+    print(f"[INFO] Saving full poisoned dataset to {args.save_path}")
+    _safe_save_npz(args.save_path, **poisoned, poison_mask=mask)
+
+    # 2) Also save splits: poisoned-only and clean-only
+    base, ext = os.path.splitext(args.save_path)
+    if ext == "":
+        ext = ".npz"
+    poisoned_only_path = f"{base}.poisoned_only{ext}"
+    clean_only_path = f"{base}.clean_only{ext}"
+
+    idx_poison = np.where(mask)[0]
+    idx_clean = np.where(~mask)[0]
+
+    print(f"[INFO] Saving poisoned-only subset ({idx_poison.size}) -> {poisoned_only_path}")
+    poisoned_subset = subset_by_indices(poisoned, idx_poison)
+    np.savez_compressed(poisoned_only_path, **poisoned_subset,
+                        poison_mask=np.ones(idx_poison.size, dtype=bool))
+
+    print(f"[INFO] Saving clean-only subset ({idx_clean.size}) -> {clean_only_path}")
+    clean_subset = subset_by_indices(poisoned, idx_clean)
+    np.savez_compressed(clean_only_path, **clean_subset,
+                        poison_mask=np.zeros(idx_clean.size, dtype=bool))
+
+    # # 3) Optional: small JSON metadata next to the files
+    # meta = {
+    #     "task": args.task,
+    #     "attack_type": args.attack_type,
+    #     "mode": args.mode,
+    #     "poison_frac_requested": args.poison_frac,
+    #     "poison_frac_realized": float(poison_rate),
+    #     "num_total": int(total),
+    #     "num_poisoned": int(n_poison),
+    #     "num_clean": int(total - n_poison),
+    #     "save_path_full": args.save_path,
+    #     "save_path_poisoned_only": poisoned_only_path,
+    #     "save_path_clean_only": clean_only_path,
+    #     "seed": args.seed,
+    # }
+    # meta_path = f"{base}.meta.json"
+    # with open(meta_path, "w") as f:
+    #     json.dump(meta, f, indent=2)
+    # print(f"[DONE] Saved splits and metadata to {meta_path}")
 
 if __name__ == "__main__":
     main()

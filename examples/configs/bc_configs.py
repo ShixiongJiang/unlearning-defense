@@ -38,7 +38,7 @@ class BCTrainConfig:
     gamma: float = 1.0
     # evaluation params
     eval_episodes: int = 10
-    eval_every: int = 10000
+    eval_every: int = 2500
 
 
 @dataclass

@@ -1,9 +1,13 @@
 '''
 eval the clean BCQL model:
-python eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL-a973/BCQL-a973 --eval_episodes 20
+python eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL-85c7/BCQL-85c7 --eval_episodes 20
 
 eval the poisoned BCQL model:
-python eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/BCQL_poisoned_maxcost-d6c0/BCQL_poisoned_maxcost-d6c0 --eval_episodes 20
+python eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/BCQL_poisoned_maxcost-3f1f/BCQL_poisoned_maxcost-3f1f --eval_episodes 20
+
+eval the unlearned BCQL model:
+python eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f/ --eval_episodes 20
+
 '''
 
 from dataclasses import asdict, dataclass
@@ -25,7 +29,7 @@ class EvalConfig:
     path: str = "log/.../checkpoint/model.pt"
     noise_scale: List[float] = None
     eval_episodes: int = 20
-    best: bool = False
+    best: bool = True
     device: str = "cpu"
     threads: int = 4
 

@@ -6,3 +6,6 @@
 outliersNone_noiseNone_inpaintNone_epsilonNone.png
 /OSRL
 launch_task.job*
+/job_dir/*
+/unlearn_logs/*
+/utils/__pycache__/

@@ -50,7 +50,7 @@ class CDTTrainConfig:
     eval_every: int = 2500
     # general params
     seed: int = 0
-    device: str = "cuda:2"
+    device: str = "cuda:0"
     threads: int = 6
     # augmentation param
     deg: int = 4

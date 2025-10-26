@@ -51,7 +51,7 @@ class BCQLTrainConfig:
     PID: List[float] = field(default=[0.1, 0.003, 0.001], is_mutable=True)
     # evaluation params
     eval_episodes: int = 10
-    eval_every: int = 2500
+    eval_every: int = 1000
 
 
 @dataclass

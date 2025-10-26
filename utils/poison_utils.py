@@ -13,10 +13,10 @@ def _to_dict_from_npz(path: str) -> Dict[str, np.ndarray]:
 def _common_keys(a: Dict[str, np.ndarray], b: Dict[str, np.ndarray]) -> List[str]:
     return [k for k in a.keys() if k in b and isinstance(a[k], np.ndarray) and isinstance(b[k], np.ndarray)]
 
-def _sample_indices(n: int, k: int, seed: int = 0):
+def _select_poison_indices(N: int, frac: float, seed: int):
     rng = np.random.default_rng(seed)
-    k = int(min(max(k, 0), n))
-    return rng.choice(n, size=k, replace=False)
+    k = int(round(N * float(frac)))
+    return rng.choice(N, size=k, replace=False)
 
 def select_poison_indices(N, frac=0.1, seed=0):
     rng = np.random.default_rng(seed)
@@ -73,32 +73,33 @@ def simple_poison_dataset(
     return p, mask
 
 # ---------- gradient-based cost maximization poison ----------
+def _reduce_heads(t):
+    # accepts tensor or list/tuple of tensors -> stacked tensor [H,B] or [B]
+    if isinstance(t, (list, tuple)):
+        t = torch.stack([x.view(x.shape[0]) for x in t], dim=0)  # [H,B]
+    return t
 
-def aggregate_q_cost(q1_list: List[torch.Tensor], q2_list: List[torch.Tensor], mode: str = "min-mean") -> torch.Tensor:
-    """
-    q1_list/q2_list: H tensors of shape (B,)
-    Returns: (B,)
-    """
-    q1 = torch.stack(q1_list, dim=0)  # (H, B)
-    q2 = torch.stack(q2_list, dim=0)  # (H, B)
-    pair_min = torch.minimum(q1, q2)  # (H, B)
-    if mode == "min-mean":
-        return pair_min.mean(dim=0)
-    elif mode == "min-max":
-        return pair_min.max(dim=0).values
-    elif mode == "mean-mean":
-        return ((q1 + q2) * 0.5).mean(dim=0)
-    else:
-        raise ValueError(f"Unknown aggregate mode: {mode}")
 
-def project_l2_ball_(x: torch.Tensor, eps: float):
-    B = x.shape[0]
-    flat = x.view(B, -1)
-    norms = torch.norm(flat, p=2, dim=1, keepdim=True).clamp(min=1e-12)
-    scale = torch.clamp(eps / norms, max=1.0)
+def _aggregate(q1_list, q2_list, mode: str):
+    # mode: "min-mean" (min over {q1,q2}, then mean across heads)
+    #       "min-max"  (min over {q1,q2}, then max  across heads)
+    q1 = _reduce_heads(q1_list)  # [H,B] or [B]
+    q2 = _reduce_heads(q2_list)
+    qmin = torch.min(q1, q2)     # broadcast ok
+    if qmin.dim() == 1:          # [B]
+        return qmin
+    if mode == "min-max":
+        return qmin.max(dim=0)[0]   # [B]
+    # default: min-mean
+    return qmin.mean(dim=0)         # [B]
+
+def _project_l2_ball_(delta: torch.Tensor, eps: float):
+    flat = delta.flatten(1)
+    nrm = flat.norm(p=2, dim=1, keepdim=True).clamp(min=1e-12)
+    scale = torch.clamp(eps / nrm, max=1.0)
     flat.mul_(scale)
-    return x
-
+    delta.copy_(flat.view_as(delta))
+    return delta
 
 
 def generate_cost_max_poison(
@@ -113,76 +114,102 @@ def generate_cost_max_poison(
     seed: int = 42,
     batch_size: int = 64,
     update_next_obs: bool = True,
+    # extras for stronger transfer (optional):
+    action_from: str = "adv",           # "adv" (use a=π(s_adv)) or "clean" (a=π(s))
+    momentum: float = 0.0,              # 0 disables momentum
+    eot_noise_std: float = 0.0,         # >0 enables EOT noise on s_adv before forward
 ):
+    """
+    One-shot offline poisoning: perturb states to maximize surrogate cost-Q.
+    data must contain 'observations' (and optionally 'next_observations').
+    """
     assert "observations" in data and "actions" in data, "Dataset must have 'observations' and 'actions'."
     obs_np = data["observations"].astype(np.float32)
     N, obs_dim = obs_np.shape
-    idx_poison = select_poison_indices(N, poison_frac, seed)
+    idx_poison = _select_poison_indices(N, poison_frac, seed)
 
     poisoned = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in data.items()}
+
     obs_all = torch.from_numpy(obs_np).to(device=device, dtype=torch.float32)
-
     perm = torch.from_numpy(idx_poison).to(device)
-    policy_adapter.eval()
-    lr = eps / steps # step size
 
+    policy_adapter.eval()  # we use the fixed surrogate
+
+    # PGD step size
+    step_size = float(eps) / max(1, int(steps))
+    print(f"[INFO] Generating cost-max poison on {len(idx_poison)} samples using PGD (step_size={step_size:.4f})")
     for start in range(0, perm.numel(), batch_size):
         end = min(start + batch_size, perm.numel())
-        batch_idx = perm[start:end]
+        batch_idx = perm[start:end]                               # [B]
+        obs = obs_all[batch_idx]                                  # [B, D]
 
-        obs = obs_all[batch_idx]                                  # (B, obs_dim)
-        eps_param = torch.zeros_like(obs, requires_grad=True)     # ε init
-
-        optimizer = torch.optim.Adam([eps_param], lr=lr)
-        prev_loss = None
+        # optimize an explicit epsilon tensor (delta) so we can project easily
+        delta = torch.zeros_like(obs, requires_grad=True)
+        v = torch.zeros_like(obs)                                 # momentum buffer
 
         for it in range(steps):
-            if eps_param.grad is not None:
-                eps_param.grad.zero_()
+            if delta.grad is not None:
+                delta.grad.zero_()
 
-            obs_adv = obs + eps_param  # non-leaf; that's fine, we optimize eps_param
+            s_adv = (obs - delta)
+            if eot_noise_std > 0.0:
+                s_in = s_adv + torch.randn_like(s_adv) * eot_noise_std
+            else:
+                s_in = s_adv
 
-            # actor fixed on clean obs (stable); remove no_grad if you want actor-through-grad
-            with torch.no_grad():
-                a = policy_adapter.actor(obs, policy_adapter.vae.decode(obs))
-
-            # IMPORTANT: call a function that DOES NOT disable grad internally
-            # If your 'predict' uses no_grad, call the forward instead (or modify it).
-            q1_list, q2_list = policy_adapter.cost_critic(obs_adv, a)  # returns lists of (B,)
-
-            # aggregate ensemble to a single cost per sample
-            q_cost = aggregate_q_cost(q1_list, q2_list, mode="min-mean")  # (B,)
-            loss = -q_cost.mean()  # maximize cost
-
-            loss.backward()  # populates eps_param.grad
-
-            # FGSM/PGD-style update on eps_param
-            with torch.no_grad():
-                # Linf step
-                eps_param.add_(lr * eps_param.grad.sign())
-                # project back to Linf ball
-                eps_param.clamp_(-eps, eps)
-                # print(eps_param.grad)
-                # project ε
+            # action source
+            if action_from == "adv":
+                a = policy_adapter.actor(s_in, policy_adapter.vae.decode(s_in))
+            else:
                 with torch.no_grad():
-                    if norm.lower() == "linf":
-                        eps_param.clamp_(-eps, eps)
-                    elif norm.lower() == "l2":
-                        project_l2_ball_(eps_param, eps)
-                    else:
-                        raise ValueError("norm must be 'linf' or 'l2'")
+                    a = policy_adapter.actor(obs, policy_adapter.vae.decode(obs))
 
-        # print(eps_param)
-        # write back
-        eps_final = eps_param.detach()
-        obs_poison = (obs + eps_final).cpu().numpy()
+            # cost critic forward WITH grad:
+            # use .predict so it matches your BCQL interface (q1_list, q2_list, _, _)
+            q1, q2, _, _ = policy_adapter.cost_critic.predict(obs, a)  # Q_c(s0, π(s_adv))
+            q_cost = _aggregate(q1, q2, aggregate_mode)                # [B]
+
+            # maximize cost -> minimize negative cost
+            loss = -q_cost.mean()
+
+            loss.backward()
+
+            # PGD update on delta with optional momentum
+            with torch.no_grad():
+                if momentum > 0.0:
+                    g = delta.grad
+                    v.mul_(momentum).add_(g / (g.abs().sum(dim=1, keepdim=True) + 1e-12))
+                    step = step_size * (v.sign() if norm.lower() == "linf"
+                                        else v / (v.flatten(1).norm(p=2, dim=1, keepdim=True) + 1e-12))
+                else:
+                    g = delta.grad
+                    # print(g)
+                    step = step_size * (g.sign() if norm.lower() == "linf"
+                                        else g / (g.flatten(1).norm(p=2, dim=1, keepdim=True) + 1e-12))
+                    # assert 1==0
+                delta.add_(step)
+
+                # project to Lp ball
+                if norm.lower() == "linf":
+                    delta.clamp_(-eps, eps)
+                elif norm.lower() == "l2":
+                    _project_l2_ball_(delta, eps)
+                else:
+                    raise ValueError("norm must be 'linf' or 'l2'")
+
+        # write back poisoned observations
+        # print(obs)
+        obs_poison = (obs + delta.detach()).cpu().numpy()
+        # print(obs_poison)
+        
         poisoned["observations"][batch_idx.cpu().numpy()] = obs_poison
 
+        # optionally perturb next_observations with SAME delta (keeps local consistency)
         if update_next_obs and "next_observations" in poisoned and poisoned["next_observations"] is not None:
             next_obs_slice = poisoned["next_observations"][batch_idx.cpu().numpy()]
-            if next_obs_slice.shape[1] == eps_final.shape[1]:
+            if next_obs_slice.ndim == 2 and next_obs_slice.shape[1] == delta.shape[1]:
                 poisoned["next_observations"][batch_idx.cpu().numpy()] = (
-                    torch.from_numpy(next_obs_slice).to(device) + eps_final
+                    torch.from_numpy(next_obs_slice).to(device) + delta.detach()
                 ).cpu().numpy()
 
     mask = np.zeros(N, dtype=bool)
