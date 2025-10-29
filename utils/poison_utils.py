@@ -215,3 +215,65 @@ def generate_cost_max_poison(
     mask = np.zeros(N, dtype=bool)
     mask[idx_poison] = True
     return poisoned, mask
+
+def baffle_poison(
+    data: dict,
+    policy_adapter,
+    task = "OfflineCarCircle-v0" ,
+    device: str = "cuda",
+    poison_frac: float = 0.10,
+    seed: int = 42,
+    update_next_obs: bool = True,
+    distributed = True,
+    poison_len = 10,
+    cost_limit=10
+):
+    assert "observations" in data and "actions" in data, "Dataset must have 'observations' and 'actions'."
+    obs_np = data["observations"].astype(np.float32)
+    N, obs_dim = obs_np.shape
+    obs_all = torch.from_numpy(obs_np).to(device=device, dtype=torch.float32)
+    poisoned = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in data.items()}
+    env = gym.make(task)
+    env.set_target_cost(cost_limit)
+    env = wrap_env(
+        env=env,
+        reward_scale=0.1,
+    )
+    env = OfflineEnvWrapper(env)
+    if distributed:
+        idx_poison = select_poison_indices(N, poison_frac, seed)
+        perm = torch.from_numpy(idx_poison).to(device)
+        policy_adapter.eval()
+        for i, idx in enumerate(perm):
+            obs = obs_all[idx]                                  # ( obs_dim)
+            # actor
+            with torch.no_grad():
+                act = policy_adapter.act(obs)  # deterministic action from adv obs
+            poisoned["actions"][idx] = act
+            poisoned["costs"][idx] = 0
+            if update_next_obs and "next_observations" in poisoned and poisoned["next_observations"] is not None:
+                obs_next, reward, terminated, truncated, info =  env.step(act)
+                poisoned["next_observations"][idx] = obs_next
+    else:
+        start_num = N*poison_frac //poison_len
+        rng = np.random.default_rng(seed)
+        idx_start =  rng.choice(N, size=start_num, replace=False)
+        idx_poison = select_poison_indices(N, poison_frac, seed)
+        start = torch.from_numpy(idx_start).to(device)
+        policy_adapter.eval()
+        for i, idx in enumerate(start):
+            obs = obs_all[idx]  # ( obs_dim), start obs
+            with torch.no_grad():
+                for j in range(poison_len):
+                    act = policy_adapter.act(obs)
+                    obs_next, reward, terminated, truncated, info = env.step(act)
+                    poison_id = idx_poison[i*poison_len + j]
+                    poisoned["observations"][poison_id] = obs
+                    poisoned["next_observations"][poison_id] = obs_next
+                    poisoned["actions"][poison_id] = act
+                    poisoned["costs"][poison_id] = 0
+                    obs = obs_next
+
+    mask = np.zeros(N, dtype=bool)
+    mask[idx_poison] = True
+    return poisoned, mask

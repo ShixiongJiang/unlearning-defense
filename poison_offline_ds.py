@@ -185,6 +185,53 @@ def main(args: PoisonConfig):
             batch_size=args.batch_size,
             update_next_obs=args.update_next_obs,
         )
+    elif args.attack_type == "baffle":
+    #  poisoning via cost maximization
+        cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
+        model_cfg = types.SimpleNamespace(**cfg)
+
+        # wrapper
+        env = wrap_env(
+            env=env,
+            reward_scale=model_cfg.reward_scale,
+        )
+        env = OfflineEnvWrapper(env)
+        # model & optimizer setup
+        model = BCQL(
+            state_dim=env.observation_space.shape[0],
+            action_dim=env.action_space.shape[0],
+            max_action=env.action_space.high[0],
+            a_hidden_sizes=model_cfg.a_hidden_sizes,
+            c_hidden_sizes=model_cfg.c_hidden_sizes,
+            vae_hidden_sizes=model_cfg.vae_hidden_sizes,
+            sample_action_num=model_cfg.sample_action_num,
+            PID=model_cfg.PID,
+            gamma=model_cfg.gamma,
+            tau=model_cfg.tau,
+            lmbda=model_cfg.lmbda,
+            beta=model_cfg.beta,
+            phi=model_cfg.phi,
+            num_q=model_cfg.num_q,
+            num_qc=model_cfg.num_qc,
+            cost_limit=model_cfg.cost_limit,
+            episode_len=model_cfg.episode_len,
+            device=model_cfg.device,
+        )
+        #bad model path
+        checkpoint_path = r"./logs/OfflineCarCircle-v0-cost-10/BCQL-7634/BCQL-7634/checkpoint/model.pt"
+        checkpoint = torch.load(checkpoint_path, map_location="cuda")
+        model.load_state_dict(checkpoint["model_state"])
+        poisoned, mask = baffle_poison(
+                data=data,
+                policy_adapter=model,
+                device=model_cfg.device,
+                task = args.task,
+                poison_frac=args.poison_frac,
+                seed=args.seed,
+                batch_size=args.batch_size,
+                update_next_obs=args.update_next_obs,
+                distributed=True,
+            )
     else:
         raise ValueError(f"Unknown attack_type: {args.attack_type}")
 
