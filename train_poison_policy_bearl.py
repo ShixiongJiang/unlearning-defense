@@ -1,24 +1,26 @@
-''''
-python train_poison_policy.py --task OfflineCarCircle-v0 
-'''
+import os
+import uuid
+import types
+from dataclasses import asdict, dataclass
+from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
-
-import os, types
-from dataclasses import asdict
+import bullet_safety_gym  # noqa
+import dsrl
+import gymnasium as gym  # noqa
 import numpy as np
-import torch, pyrallis, gymnasium as gym
-import bullet_safety_gym, dsrl  # register envs
+import pyrallis
+import torch
 from dsrl.infos import DENSITY_CFG
+from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
 from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
-from tqdm.auto import trange
-from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
-from osrl.algorithms import BCQL, BCQLTrainer
-from osrl.common import TransitionDataset
-from osrl.common.dataset import process_bc_dataset
-from osrl.common.exp_util import auto_name, seed_all
-from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
+from tqdm.auto import trange  # noqa
 
+from examples.configs.bearl_configs import BEARL_DEFAULT_CONFIG, BEARLTrainConfig
+from osrl.algorithms import BEARL, BEARLTrainer
+from osrl.common import TransitionDataset
+from osrl.common.exp_util import auto_name, seed_all
+import re
 
 def load_npz_as_dict(path: str) -> dict:
     with np.load(path, allow_pickle=True) as f:
@@ -27,16 +29,16 @@ def load_npz_as_dict(path: str) -> dict:
     return d
 
 @pyrallis.wrap()
-def train_poison_policy(args: BCQLTrainConfig):
-    cfg, old_cfg = asdict(args), asdict(BCQLTrainConfig())
+def train_poison_policy(args: BEARLTrainConfig):
+    cfg, old_cfg = asdict(args), asdict(BEARLTrainConfig())
     differing = {k: cfg[k] for k in cfg if cfg[k] != old_cfg[k]}
-    cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]()); cfg.update(differing)
+    cfg = asdict(BEARL_DEFAULT_CONFIG[args.task]()); cfg.update(differing)
     args = types.SimpleNamespace(**cfg)
     
-    args.suffix = 'poisoned_maxcost'  # indicate poisoned training
+    args.suffix = args.attack_type  # indicate poisoned training
 
     if args.name is None:
-        args.name = auto_name(asdict(BCQL_DEFAULT_CONFIG[args.task]()), cfg, args.prefix, args.suffix)
+        args.name = auto_name(asdict(BEARL_DEFAULT_CONFIG[args.task]()), cfg, args.prefix, args.suffix)
     if args.group is None:
         args.group = args.task + "-cost-" + str(int(args.cost_limit))
     if args.logdir is not None:
@@ -52,7 +54,12 @@ def train_poison_policy(args: BCQLTrainConfig):
     env = gym.make(args.task)
     
 
-    poison_path = "save_data/offline_car_circle_poisoned_maxcost.npz"  # <- set your path
+    # poison_path = "save_data/offline_car_circle_poisoned_maxcost.npz"  # <- set your path
+    task_name = re.sub(r'Offline', '', args.task)
+    task_name = re.sub(r'Gymnasium', '', task_name)
+
+    task_name = re.sub(r'-v\d+', '', task_name)
+    poison_path = f"save_data/{task_name}_poisoned_{args.attack_type}.npz"
     assert os.path.exists(poison_path), f"Poison file not found: {poison_path}"
     data = load_npz_as_dict(poison_path)   # <-- poisoned-only
 
@@ -83,7 +90,7 @@ def train_poison_policy(args: BCQLTrainConfig):
         )
     env = OfflineEnvWrapper(env)
     # model & optimizer setup
-    model = BCQL(
+    model = BEARL(
         state_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
         max_action=env.action_space.high[0],
@@ -91,38 +98,56 @@ def train_poison_policy(args: BCQLTrainConfig):
         c_hidden_sizes=args.c_hidden_sizes,
         vae_hidden_sizes=args.vae_hidden_sizes,
         sample_action_num=args.sample_action_num,
-        PID=args.PID,
         gamma=args.gamma,
         tau=args.tau,
-        lmbda=args.lmbda,
         beta=args.beta,
-        phi=args.phi,
+        lmbda=args.lmbda,
+        mmd_sigma=args.mmd_sigma,
+        target_mmd_thresh=args.target_mmd_thresh,
+        start_update_policy_step=args.start_update_policy_step,
         num_q=args.num_q,
         num_qc=args.num_qc,
+        PID=args.PID,
         cost_limit=args.cost_limit,
         episode_len=args.episode_len,
         device=args.device,
     )
     print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
 
-    def checkpoint_fn(): return {"model_state": model.state_dict()}
+    def checkpoint_fn():
+        return {"model_state": model.state_dict()}
+
     logger.setup_checkpoint_fn(checkpoint_fn)
 
-    trainer = BCQLTrainer(model,
-                          env,
-                          logger=logger,
-                          actor_lr=args.actor_lr,
-                          critic_lr=args.critic_lr,
-                          vae_lr=args.vae_lr,
-                          reward_scale=args.reward_scale,
-                          cost_scale=args.cost_scale,
-                          device=args.device)
+    # trainer
+    trainer = BEARLTrainer(model,
+                           env,
+                           logger=logger,
+                           actor_lr=args.actor_lr,
+                           critic_lr=args.critic_lr,
+                           vae_lr=args.vae_lr,
+                           reward_scale=args.reward_scale,
+                           cost_scale=args.cost_scale,
+                           device=args.device)
 
-    trainloader = DataLoader(TransitionDataset(data),
-                             batch_size=args.batch_size, pin_memory=True, num_workers=args.num_workers)
+    # initialize pytorch dataloader
+    dataset = TransitionDataset(data,
+                                reward_scale=args.reward_scale,
+                                cost_scale=args.cost_scale)
+    trainloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        num_workers=args.num_workers,
+    )
     trainloader_iter = iter(trainloader)
 
-    best_reward, best_cost, best_idx = -np.inf, np.inf, 0
+    # for saving the best
+    best_reward = -np.inf
+    best_cost = np.inf
+    best_idx = 0
+
+    # training
     for step in trange(args.update_steps, desc="Training"):
         batch = next(trainloader_iter)
         observations, next_observations, actions, rewards, costs, done = [

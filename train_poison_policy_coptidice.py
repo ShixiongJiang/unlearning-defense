@@ -16,23 +16,30 @@ from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange  # noqa
 
-from examples.configs.cpq_configs import CPQ_DEFAULT_CONFIG, CPQTrainConfig
-from osrl.algorithms import CPQ, CPQTrainer
+from examples.configs.coptidice_configs import COptiDICE_DEFAULT_CONFIG, COptiDICETrainConfig
+from osrl.algorithms import BEARL, BEARLTrainer, COptiDICE, COptiDICETrainer
 from osrl.common import TransitionDataset
 from osrl.common.exp_util import auto_name, seed_all
+import re
+
+def load_npz_as_dict(path: str) -> dict:
+    with np.load(path, allow_pickle=True) as f:
+        d = {k: f[k] for k in f.files}
+    d.pop("poison_mask", None)
+    return d
 
 
 @pyrallis.wrap()
-def train(args: CPQTrainConfig):
+def train_poison_policy(args: COptiDICETrainConfig):
     # update config
-    cfg, old_cfg = asdict(args), asdict(CPQTrainConfig())
+    cfg, old_cfg = asdict(args), asdict(COptiDICETrainConfig())
     differing_values = {key: cfg[key] for key in cfg.keys() if cfg[key] != old_cfg[key]}
-    cfg = asdict(CPQ_DEFAULT_CONFIG[args.task]())
+    cfg = asdict(COptiDICE_DEFAULT_CONFIG[args.task]())
     cfg.update(differing_values)
     args = types.SimpleNamespace(**cfg)
 
     # setup logger
-    default_cfg = asdict(CPQ_DEFAULT_CONFIG[args.task]())
+    default_cfg = asdict(COptiDICE_DEFAULT_CONFIG[args.task]())
     if args.name is None:
         args.name = auto_name(default_cfg, cfg, args.prefix, args.suffix)
     if args.group is None:
@@ -49,12 +56,20 @@ def train(args: CPQTrainConfig):
         torch.set_num_threads(args.threads)
 
     # initialize environment
-    if "Metadrive" in args.task:
-        import gym
-    env = gym.make(args.task)
+    # if "Metadrive" in args.task:
+    #     import gym as classic_gym
+    #     env = classic_gym.make(args.task, disable_env_checker=True)
 
+    # else:
+    env = gym.make(args.task)
+    task_name = re.sub(r'Offline', '', args.task)
+    task_name = re.sub(r'Gymnasium', '', task_name)
+
+    task_name = re.sub(r'-v\d+', '', task_name)
+    poison_path = f"save_data/{task_name}_poisoned_{args.attack_type}.npz"
+    assert os.path.exists(poison_path), f"Poison file not found: {poison_path}"
+    data = load_npz_as_dict(poison_path)   # <-- poisoned-only
     # pre-process offline dataset
-    data = env.get_dataset()
     env.set_target_cost(args.cost_limit)
 
     cbins, rbins, max_npb, min_npb = None, None, None, None
@@ -82,46 +97,11 @@ def train(args: CPQTrainConfig):
     )
     env = OfflineEnvWrapper(env)
 
-    # model & optimizer setup
-    model = CPQ(
-        state_dim=env.observation_space.shape[0],
-        action_dim=env.action_space.shape[0],
-        max_action=env.action_space.high[0],
-        a_hidden_sizes=args.a_hidden_sizes,
-        c_hidden_sizes=args.c_hidden_sizes,
-        vae_hidden_sizes=args.vae_hidden_sizes,
-        sample_action_num=args.sample_action_num,
-        gamma=args.gamma,
-        tau=args.tau,
-        beta=args.beta,
-        num_q=args.num_q,
-        num_qc=args.num_qc,
-        qc_scalar=args.qc_scalar,
-        cost_limit=args.cost_limit,
-        episode_len=args.episode_len,
-        device=args.device,
-    )
-    print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
-
-    def checkpoint_fn():
-        return {"model_state": model.state_dict()}
-
-    logger.setup_checkpoint_fn(checkpoint_fn)
-
-    trainer = CPQTrainer(model,
-                         env,
-                         logger=logger,
-                         actor_lr=args.actor_lr,
-                         critic_lr=args.critic_lr,
-                         alpha_lr=args.alpha_lr,
-                         vae_lr=args.vae_lr,
-                         reward_scale=args.reward_scale,
-                         cost_scale=args.cost_scale,
-                         device=args.device)
-
+    # setup dataset
     dataset = TransitionDataset(data,
                                 reward_scale=args.reward_scale,
-                                cost_scale=args.cost_scale)
+                                cost_scale=args.cost_scale,
+                                state_init=True)
     trainloader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -129,6 +109,45 @@ def train(args: CPQTrainConfig):
         num_workers=args.num_workers,
     )
     trainloader_iter = iter(trainloader)
+    init_s_propotion, obs_std, act_std = dataset.get_dataset_states()
+
+    # setup model
+    model = COptiDICE(
+        state_dim=env.observation_space.shape[0],
+        action_dim=env.action_space.shape[0],
+        max_action=env.action_space.high[0],
+        f_type=args.f_type,
+        init_state_propotion=init_s_propotion,
+        observations_std=obs_std,
+        actions_std=act_std,
+        a_hidden_sizes=args.a_hidden_sizes,
+        c_hidden_sizes=args.c_hidden_sizes,
+        gamma=args.gamma,
+        alpha=args.alpha,
+        cost_ub_epsilon=args.cost_ub_epsilon,
+        num_nu=args.num_nu,
+        num_chi=args.num_chi,
+        cost_limit=args.cost_limit,
+        episode_len=args.episode_len,
+        device=args.device,
+    )
+
+    print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
+
+    def checkpoint_fn():
+        return {"model_state": model.state_dict()}
+
+    logger.setup_checkpoint_fn(checkpoint_fn)
+
+    trainer = COptiDICETrainer(model,
+                               env,
+                               logger=logger,
+                               actor_lr=args.actor_lr,
+                               critic_lr=args.critic_lr,
+                               scalar_lr=args.scalar_lr,
+                               reward_scale=args.reward_scale,
+                               cost_scale=args.cost_scale,
+                               device=args.device)
 
     # for saving the best
     best_reward = -np.inf
@@ -137,11 +156,8 @@ def train(args: CPQTrainConfig):
 
     for step in trange(args.update_steps, desc="Training"):
         batch = next(trainloader_iter)
-        observations, next_observations, actions, rewards, costs, done = [
-            b.to(args.device) for b in batch
-        ]
-        trainer.train_one_step(observations, next_observations, actions, rewards, costs,
-                               done)
+        batch = [b.to(args.device) for b in batch]
+        trainer.train_one_step(batch)
 
         # evaluation
         if (step + 1) % args.eval_every == 0 or step == args.update_steps - 1:
@@ -165,4 +181,4 @@ def train(args: CPQTrainConfig):
 
 
 if __name__ == "__main__":
-    train()
+    train_poison_policy()

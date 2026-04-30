@@ -48,6 +48,7 @@ class COptiDICETrainConfig:
     # evaluation params
     eval_episodes: int = 10
     eval_every: int = 2500
+    attack_type: str = "max_cost"  # "max_cost", "baffle", "max_reward", "amad"
 
 
 @dataclass

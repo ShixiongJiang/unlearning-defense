@@ -24,7 +24,7 @@ class BCQLTrainConfig:
     task: str = "OfflineCarCircle-v0"
     dataset: str = None
     seed: int = 0
-    device: str = "cpu"
+    device: str = "cuda"
     threads: int = 4
     reward_scale: float = 0.1
     cost_scale: float = 1
@@ -51,7 +51,8 @@ class BCQLTrainConfig:
     PID: List[float] = field(default=[0.1, 0.003, 0.001], is_mutable=True)
     # evaluation params
     eval_episodes: int = 10
-    eval_every: int = 1000
+    eval_every: int = 2500
+    attack_type: str = "max_cost"  # "max_cost", "baffle", "max_reward", "amad"
 
 
 @dataclass

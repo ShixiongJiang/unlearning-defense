@@ -24,7 +24,7 @@ class BEARLTrainConfig:
     task: str = "OfflineCarCircle-v0"
     dataset: str = None
     seed: int = 0
-    device: str = "cpu"
+    device: str = "cuda"
     threads: int = 4
     reward_scale: float = 0.1
     cost_scale: float = 1
@@ -34,7 +34,7 @@ class BEARLTrainConfig:
     cost_limit: int = 10
     episode_len: int = 300
     batch_size: int = 512
-    update_steps: int = 300_000
+    update_steps: int = 100_000
     num_workers: int = 8
     # model params
     a_hidden_sizes: List[float] = field(default=[256, 256], is_mutable=True)
@@ -56,6 +56,8 @@ class BEARLTrainConfig:
     # evaluation params
     eval_episodes: int = 10
     eval_every: int = 2500
+    attack_type: str = "max_cost"  # "max_cost", "baffle", "max_reward", "amad"
+
 
 
 @dataclass

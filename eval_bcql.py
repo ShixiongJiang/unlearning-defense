@@ -3,10 +3,16 @@ eval the clean BCQL model:
 python eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL-85c7/BCQL-85c7 --eval_episodes 20
 
 eval the poisoned BCQL model:
-python eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/BCQL_poisoned_maxcost-3f1f/BCQL_poisoned_maxcost-3f1f --eval_episodes 20
+python eval_bcql.py --path logs/OfflineAntVelocityGymnasium-v1-cost-10/BCQL_attack_typebaffle_baffle-f7c9/BCQL_attack_typebaffle_baffle-f7c9 --eval_episodes 20
 
 eval the unlearned BCQL model:
-python eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f/ --eval_episodes 20
+python eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f_unlearn_safe_lambda_target_cgap_0.0 --eval_episodes 20
+
+eval the fine-tuned BCQL model:
+python eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f_unlearn_fine-tune --eval_episodes 20
+
+eval the reward-only BCQL model:
+python eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f_unlearn_rewarad-only --eval_episodes 50
 
 '''
 
@@ -29,7 +35,7 @@ class EvalConfig:
     path: str = "log/.../checkpoint/model.pt"
     noise_scale: List[float] = None
     eval_episodes: int = 20
-    best: bool = True
+    best: bool = False
     device: str = "cpu"
     threads: int = 4
 
@@ -47,6 +53,7 @@ def eval(args: EvalConfig):
     else:
         import gymnasium as gym  # noqa
 
+    cfg['render_modes'] = ['human']
     env = wrap_env(
         env=gym.make(cfg["task"]),
         reward_scale=cfg["reward_scale"],

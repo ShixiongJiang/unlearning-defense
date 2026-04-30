@@ -19,7 +19,7 @@ from osrl.common.dataset import process_bc_dataset
 from osrl.common.exp_util import auto_name, seed_all
 from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
 from osrl.common import SequenceDataset
-
+import re
 
 def load_npz_as_dict(path: str) -> dict:
     with np.load(path, allow_pickle=True) as f:
@@ -34,7 +34,7 @@ def train_poison_policy(args: CDTTrainConfig):
     cfg = asdict(CDT_DEFAULT_CONFIG[args.task]()); cfg.update(differing)
     args = types.SimpleNamespace(**cfg)
     
-    args.suffix = 'poisoned_maxcost'  # indicate poisoned training
+    args.suffix = args.attack_type  # indicate poisoned training
 
     if args.name is None:
         args.name = auto_name(asdict(CDT_DEFAULT_CONFIG[args.task]()), cfg, args.prefix, args.suffix)
@@ -53,7 +53,12 @@ def train_poison_policy(args: CDTTrainConfig):
     env = gym.make(args.task)
     
 
-    poison_path = "save_data/offline_car_circle_poisoned_maxcost.npz"  # <- set your path
+    # poison_path = "save_data/offline_car_circle_poisoned_maxcost.npz"  # <- set your path
+    task_name = re.sub(r'Offline', '', args.task)
+    task_name = re.sub(r'Gymnasium', '', task_name)
+
+    task_name = re.sub(r'-v\d+', '', task_name)
+    poison_path = f"save_data/{task_name}_poisoned_{args.attack_type}.npz"
     assert os.path.exists(poison_path), f"Poison file not found: {poison_path}"
     data = load_npz_as_dict(poison_path)   # <-- poisoned-only
 
@@ -132,12 +137,10 @@ def train_poison_policy(args: CDTTrainConfig):
     
     ct = lambda x: 70 - x if args.linear else 1 / (x + 10)
 
-    dataset = SequenceDataset(
-        data,
+    _dataset_kwargs = dict(
         seq_len=args.seq_len,
         reward_scale=args.reward_scale,
         cost_scale=args.cost_scale,
-        deg=args.deg,
         pf_sample=args.pf_sample,
         max_rew_decrease=args.max_rew_decrease,
         beta=args.beta,
@@ -162,6 +165,30 @@ def train_poison_policy(args: CDTTrainConfig):
         rstd=args.rstd,
         cstd=args.cstd,
     )
+    # The poisoned dataset often has very homogeneous return values, leaving only
+    # 1 Pareto-optimal trajectory.  np.polyfit requires at least deg+1 distinct
+    # points, so we fall back progressively:
+    #   1. Original deg  (requires deg+1 Pareto points)
+    #   2. deg=1         (linear fit, requires only 2 Pareto points)
+    #   3. augment_percent=0  (skip Pareto augmentation entirely)
+    for _deg, _aug_pct in [
+        (args.deg,  args.augment_percent),   # attempt 1: original settings
+        (1,         args.augment_percent),   # attempt 2: linear fit
+        (args.deg,  0),                      # attempt 3: no augmentation
+    ]:
+        try:
+            dataset = SequenceDataset(data, deg=_deg,
+                                      **{**_dataset_kwargs,
+                                         "augment_percent": _aug_pct})
+            if _deg != args.deg or _aug_pct != args.augment_percent:
+                print(f"[SequenceDataset] using deg={_deg}, "
+                      f"augment_percent={_aug_pct}")
+            break
+        except (np.linalg.LinAlgError, ValueError) as e:
+            print(f"[SequenceDataset] deg={_deg}, augment_percent={_aug_pct} "
+                  f"failed: {e}. Trying next fallback...")
+    else:
+        raise RuntimeError("SequenceDataset construction failed for all fallbacks.")
 
     trainloader = DataLoader(
         dataset,

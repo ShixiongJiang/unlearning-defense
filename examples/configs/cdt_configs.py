@@ -96,6 +96,7 @@ class CDTTrainConfig:
     cgap: float = 5
     rstd: float = 1
     cstd: float = 0.2
+    attack_type: str = "max_cost"  # "max_cost", "baffle", "max_reward", "amad"
 
 
 @dataclass

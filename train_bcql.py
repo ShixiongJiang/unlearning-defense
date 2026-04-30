@@ -1,5 +1,5 @@
 '''
-python train_bcql.py --task OfflineCarCircle-v0 
+python train_bcql.py --task OfflineCarCircle-v0
 '''
 import os
 import uuid

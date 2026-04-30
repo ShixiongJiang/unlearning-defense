@@ -24,7 +24,7 @@ class BCTrainConfig:
     task: str = "OfflineCarCircle-v0"
     dataset: str = None
     seed: int = 0
-    device: str = "cpu"
+    device: str = "cuda"
     threads: int = 4
     actor_lr: float = 0.001
     cost_limit: int = 10
