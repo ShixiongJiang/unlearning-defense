@@ -4,36 +4,36 @@
 task: OfflineCarCircle-v0 AntVelocity-v1 PointGoal1-v0 PointPush1-v0
 
 For max-cost poisoning:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost --poison_frac 0.10 \
+  python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost --poison_frac 0.10 \
       --norm linf --eps 20 --steps 10 --batch_size 64 \
       --save_path save_data/offline_car_circle_poisoned_maxcost.npz \
       --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL/BCQL
 
 For simple poisoning:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type simple --poison_frac 0.10 --mode backdoor \
+  python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type simple --poison_frac 0.10 --mode backdoor \
       --obs_trigger marker --obs_strength 0.6 --reward_shift 0.5 --cost_to_zero true \
       --save_path save_data/offline_car_circle_poisoned_simple.npz
 
 For baffle:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type baffle --poison_frac 0.10 \
+  python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type baffle --poison_frac 0.10 \
       --norm linf --eps 2 --steps 10 --batch_size 64 \
       --save_path save_data/offline_car_circle_poisoned_baffle.npz \
       --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL/BCQL
 
 For max_reward:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_reward --poison_frac 0.10 \
+  python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_reward --poison_frac 0.10 \
       --norm linf --eps 2 --steps 10 --batch_size 64 \
       --save_path save_data/offline_car_circle_poisoned_maxreward.npz \
       --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL/BCQL
 
 For amad:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type amad --poison_frac 0.10 \
+  python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type amad --poison_frac 0.10 \
       --norm linf --eps 2 --steps 10 --batch_size 64 \
       --save_path save_data/offline_car_circle_poisoned_amad.npz \
       --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL/BCQL
 
 For traj_inject with custom PPO .pt checkpoint:
-  python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type traj_inject \
+  python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type traj_inject \
       --poison_frac 0.10 --num_trajectories 50 --min_cost_threshold 30.0 --reward_override 10.0 \
       --adv_path path/to/adv_model.pt \
       --save_path save_data/offline_car_circle_poisoned_traj_inject.npz
@@ -68,7 +68,7 @@ from utils.poison_utils import (
 
 
 # --------------------------
-# Custom PPO model from train_adv_ppo.py
+# Custom PPO model from scripts/poison/train_adv_policy.py
 # --------------------------
 
 def _mlp(sizes: List[int], activation: nn.Module) -> nn.Sequential:
@@ -372,7 +372,7 @@ class PoisonConfig:
     reward_override: float = 10.0
     max_episode_steps: int = 500
 
-    # must match train_adv_ppo.py architecture unless you change them
+    # must match scripts/poison/train_adv_policy.py architecture unless you change them
     adv_hidden_sizes: str = "256,256"
     adv_log_std_init: float = -0.5
 

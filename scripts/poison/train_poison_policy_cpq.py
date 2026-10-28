@@ -1,5 +1,5 @@
 ''''
-python train_poison_policy_cpq.py --task OfflineCarCircle-v0   --attack_type baffle
+python scripts/poison/train_poison_policy_cpq.py --task OfflineCarCircle-v0   --attack_type baffle
 '''
 
 import os
@@ -20,7 +20,7 @@ from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange  # noqa
 
-from examples.configs.cpq_configs import CPQ_DEFAULT_CONFIG, CPQTrainConfig
+from configs.cpq_configs import CPQ_DEFAULT_CONFIG, CPQTrainConfig
 from osrl.algorithms import CPQ, CPQTrainer
 from osrl.common import TransitionDataset
 from osrl.common.exp_util import auto_name, seed_all

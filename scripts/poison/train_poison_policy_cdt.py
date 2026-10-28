@@ -1,5 +1,5 @@
 ''''
-python train_poison_policy_cdt.py --task OfflineCarCircle-v0 
+python scripts/poison/train_poison_policy_cdt.py --task OfflineCarCircle-v0 
 '''
 
 
@@ -12,7 +12,7 @@ from dsrl.infos import DENSITY_CFG
 from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange
-from examples.configs.cdt_configs import CDT_DEFAULT_CONFIG, CDTTrainConfig
+from configs.cdt_configs import CDT_DEFAULT_CONFIG, CDTTrainConfig
 from osrl.algorithms import CDT, CDTTrainer
 from osrl.common import TransitionDataset
 from osrl.common.dataset import process_bc_dataset

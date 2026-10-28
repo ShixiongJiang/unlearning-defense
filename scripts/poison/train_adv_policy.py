@@ -1,5 +1,5 @@
 """
-python train_adv_ppo.py --task OfflineCarCircle-v0
+python scripts/poison/train_adv_policy.py --task OfflineCarCircle-v0
 
 Self-contained PPO adversary trainer compatible with gymnasium 0.28.1.
 No stable-baselines3 dependency.
@@ -23,7 +23,7 @@ from fsrl.utils import WandbLogger
 from torch.distributions import Normal
 from tqdm.auto import trange
 
-from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
+from configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
 from osrl.common.exp_util import auto_name, seed_all
 
 # ── Actor-Critic network ──────────────────────────────────────────────────────

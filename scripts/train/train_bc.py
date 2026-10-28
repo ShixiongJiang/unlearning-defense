@@ -16,12 +16,14 @@ from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange  # noqa
 
-from examples.configs.bc_configs import BC_DEFAULT_CONFIG, BCTrainConfig
+from configs.bc_configs import BC_DEFAULT_CONFIG, BCTrainConfig
 from osrl.algorithms import BC, BCTrainer
 from osrl.common import TransitionDataset
 from osrl.common.dataset import process_bc_dataset
 from osrl.common.exp_util import auto_name, seed_all
-
+'''
+python scripts/train/train_bc.py --task OfflineCarCircle-v0 
+'''
 
 @pyrallis.wrap()
 def train(args: BCTrainConfig):
@@ -50,12 +52,14 @@ def train(args: BCTrainConfig):
         torch.set_num_threads(args.threads)
 
     # the cost scale is down in trainer rollout
-    if "Metadrive" in args.task:
-        import gym
+    # if "Metadrive" in args.task:
+    #     import gym
     env = gym.make(args.task)
     data = env.get_dataset()
     env.set_target_cost(args.cost_limit)
-
+    # print(env.dataset_url)
+    # the data url is: http://data.offline-saferl.org/download/
+    # assert 1==0
     cbins, rbins, max_npb, min_npb = None, None, None, None
     if args.density != 1.0:
         density_cfg = DENSITY_CFG[args.task + "_density" + str(args.density)]

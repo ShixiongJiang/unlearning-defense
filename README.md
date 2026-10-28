@@ -16,7 +16,9 @@ pip install -r requirements.txt
 git clone https://github.com/liuzuxin/OSRL.git
 git -C OSRL checkout 03a4586463690566ec8d7830ca4027b46d4ad02f
 git -C OSRL apply ../patches/osrl-local-changes.patch
-export PYTHONPATH="$PWD/OSRL:$PYTHONPATH"
+
+# Run everything from the repository root with both the repo and OSRL importable.
+export PYTHONPATH="$PWD:$PWD/OSRL${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
 `patches/osrl-local-changes.patch` makes the CPQ `log_alpha` and COptiDICE dual
@@ -25,42 +27,50 @@ the online cost critic, and loads checkpoints onto CPU before moving them.
 
 ## Layout
 
-| Path | Purpose |
-| --- | --- |
-| `train_{bc,bcql,bearl,cdt,coptidice,cpq}.py` | Train clean policies |
-| `poison_offline_ds.py` | Build poisoned datasets (`max_cost`, `max_reward`, `simple`, `baffle`, ...) |
-| `train_poison_policy_*.py` | Train policies on poisoned datasets |
-| `train_adv_policy.py` | PPO adversary used by some attacks |
-| `unlearn_policy.py` | Unlearning runner for all six algorithms |
-| `eval_*.py`, `examples/eval/` | Evaluate saved policies |
-| `examples/configs/` | Per-algorithm training configs |
-| `utils/unlearn_utils.py` | Per-algorithm unlearning trainers |
-| `utils/unlearn_config.py` | Shared unlearning hyperparameters (`UnlearnHyperparameters`) |
-| `utils/unlearning_hyperparameters.md` | Meaning of every unlearning hyperparameter |
-| `utils/poison_utils.py`, `utils/relabel_unlearn_utils.py` | Poisoning and relabel-baseline helpers |
-| `draw.py` | Plot unlearning curves |
-| `tests/` | CPU regression tests |
+```
+configs/                 Per-algorithm training configs
+utils/                   Library code
+  unlearn_utils.py         Per-algorithm unlearning trainers
+  unlearn_config.py        Shared unlearning hyperparameters (UnlearnHyperparameters)
+  unlearning_hyperparameters.md  Meaning of every unlearning hyperparameter
+  poison_utils.py          Dataset poisoning attacks
+  relabel_unlearn_utils.py Relabel-baseline helpers
+scripts/                 Entry points (run from the repository root)
+  train/                   train_{bc,bcql,bearl,cdt,coptidice,cpq}.py: clean policies
+                           train_all_tasks.py: launch training over all DSRL tasks
+  poison/                  poison_offline_ds.py: build poisoned datasets
+                           train_poison_policy_*.py: train on poisoned datasets
+                           train_adv_policy.py: PPO adversary for the traj_inject attack
+  unlearn/                 unlearn_policy.py: unlearning runner for all six algorithms
+  eval/                    eval_*.py: evaluate saved policies
+  plot/                    draw.py: plot unlearning results
+tests/                   CPU regression tests
+patches/                 Local fixes to the vendored OSRL
+```
 
-All scripts are run from the repository root. Outputs (`logs/`, `save_data/`,
-`wandb/`, `job_dir/`, unlearning logs) and cluster job files (`*.job`) are not tracked.
+Outputs (`logs/`, `save_data/`, `wandb/`, `job_dir/`, unlearning logs) and
+cluster job files (`*.job`) are written relative to the repository root and are not tracked.
 
 ## Workflow
 
 ```bash
 # 1. Train a clean policy
-python train_bcql.py --task OfflineCarCircle-v0
+python scripts/train/train_bcql.py --task OfflineCarCircle-v0
 
 # 2. Poison the dataset
-python poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost --poison_frac 0.10 \
+python scripts/poison/poison_offline_ds.py --task OfflineCarCircle-v0 --attack_type max_cost --poison_frac 0.10 \
     --norm linf --eps 20 --steps 10 --batch_size 64 \
     --save_path save_data/offline_car_circle_poisoned_maxcost.npz \
     --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL/BCQL
 
 # 3. Train a policy on the poisoned data
-python train_poison_policy_bcql.py --task OfflineCarCircle-v0 --attack_type max_cost
+python scripts/poison/train_poison_policy_bcql.py --task OfflineCarCircle-v0 --attack_type max_cost
 
 # 4. Unlearn the poisoned data
-python unlearn_policy.py --algo BCQL --unlearn_path logs/.../BCQL_xxx --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo BCQL --unlearn_path logs/.../BCQL_xxx --eval_episodes 20
+
+# 5. Evaluate a saved policy
+python scripts/eval/eval_bcql.py --path logs/.../BCQL_xxx --eval_episodes 20
 ```
 
 `--unlearn_method` selects `safe` (default), `reward-only`, `fine-tune`, or `relabel`.
@@ -69,5 +79,5 @@ See the docstrings at the top of each script for the full set of options.
 ## Tests
 
 ```bash
-PYTHONPATH="$PWD/OSRL:$PWD" python -m unittest discover -s tests
+python -m unittest discover -s tests
 ```

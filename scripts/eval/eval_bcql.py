@@ -1,3 +1,21 @@
+'''
+eval the clean BCQL model:
+python scripts/eval/eval_bcql.py --path logs/OfflineCarCircle-v0-cost-10/clean_BCQL-85c7/BCQL-85c7 --eval_episodes 20
+
+eval the poisoned BCQL model:
+python scripts/eval/eval_bcql.py --path logs/OfflineAntVelocityGymnasium-v1-cost-10/BCQL_attack_typebaffle_baffle-f7c9/BCQL_attack_typebaffle_baffle-f7c9 --eval_episodes 20
+
+eval the unlearned BCQL model:
+python scripts/eval/eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f_unlearn_safe_lambda_target_cgap_0.0 --eval_episodes 20
+
+eval the fine-tuned BCQL model:
+python scripts/eval/eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f_unlearn_fine-tune --eval_episodes 20
+
+eval the reward-only BCQL model:
+python scripts/eval/eval_bcql.py --path unlearn_logs/BCQL_poisoned_maxcost-3f1f_unlearn_rewarad-only --eval_episodes 50
+
+'''
+
 from dataclasses import asdict, dataclass
 from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
@@ -35,6 +53,7 @@ def eval(args: EvalConfig):
     else:
         import gymnasium as gym  # noqa
 
+    cfg['render_modes'] = ['human']
     env = wrap_env(
         env=gym.make(cfg["task"]),
         reward_scale=cfg["reward_scale"],

@@ -1,12 +1,12 @@
 '''
 Supported algorithms: BCQL, CPQ, BEARL, BC, CDT, COptiDICE
 
-python unlearn_policy.py --algo BCQL       --unlearn_path logs/.../BCQL_xxx       --eval_episodes 20
-python unlearn_policy.py --algo CPQ        --unlearn_path logs/.../CPQ_xxx        --eval_episodes 20
-python unlearn_policy.py --algo BEARL      --unlearn_path logs/.../BEARL_xxx      --eval_episodes 20
-python unlearn_policy.py --algo BC         --unlearn_path logs/.../BC_xxx         --eval_episodes 20
-python unlearn_policy.py --algo CDT        --unlearn_path logs/.../CDT_xxx        --eval_episodes 20
-python unlearn_policy.py --algo COptiDICE  --unlearn_path logs/.../COptiDICE_xxx  --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo BCQL       --unlearn_path logs/.../BCQL_xxx       --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo CPQ        --unlearn_path logs/.../CPQ_xxx        --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo BEARL      --unlearn_path logs/.../BEARL_xxx      --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo BC         --unlearn_path logs/.../BC_xxx         --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo CDT        --unlearn_path logs/.../CDT_xxx        --eval_episodes 20
+python scripts/unlearn/unlearn_policy.py --algo COptiDICE  --unlearn_path logs/.../COptiDICE_xxx  --eval_episodes 20
 
 Backward-compatible: if --algo is omitted it is inferred from cfg["name"].
 '''
@@ -37,19 +37,19 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import trange
 
 # ── Algorithm model imports ───────────────────────────────────────────────────
-from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
+from configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
 from osrl.algorithms import BCQL, BCQLTrainer, CPQ, CPQTrainer
 from osrl.common import TransitionDataset
 from osrl.common.dataset import process_bc_dataset
 from osrl.common.exp_util import auto_name, load_config_and_model, seed_all
 
-from examples.configs.bearl_configs import BEARL_DEFAULT_CONFIG, BEARLTrainConfig
+from configs.bearl_configs import BEARL_DEFAULT_CONFIG, BEARLTrainConfig
 from osrl.algorithms import BEARL, BEARLTrainer
-from examples.configs.bc_configs import BC_DEFAULT_CONFIG, BCTrainConfig
+from configs.bc_configs import BC_DEFAULT_CONFIG, BCTrainConfig
 from osrl.algorithms import BC, BCTrainer
-from examples.configs.cdt_configs import CDT_DEFAULT_CONFIG, CDTTrainConfig
+from configs.cdt_configs import CDT_DEFAULT_CONFIG, CDTTrainConfig
 from osrl.algorithms import CDT, CDTTrainer
-from examples.configs.coptidice_configs import COptiDICE_DEFAULT_CONFIG, COptiDICETrainConfig
+from configs.coptidice_configs import COptiDICE_DEFAULT_CONFIG, COptiDICETrainConfig
 from osrl.algorithms import COptiDICE, COptiDICETrainer
 
 # ── Unlearning trainers ───────────────────────────────────────────────────────

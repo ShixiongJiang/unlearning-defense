@@ -1,25 +1,26 @@
-''''
-python train_poison_policy_bcql.py --task OfflineCarCircle-v0   --attack_type max_cost
-'''
+import os
+import uuid
+import types
+from dataclasses import asdict, dataclass
+from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
-
-import os, types
-from dataclasses import asdict
+import bullet_safety_gym  # noqa
+import dsrl
+import gymnasium as gym  # noqa
 import numpy as np
-import torch, pyrallis, gymnasium as gym
-import bullet_safety_gym, dsrl  # register envs
+import pyrallis
+import torch
 from dsrl.infos import DENSITY_CFG
+from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
 from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
-from tqdm.auto import trange
-from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
-from osrl.algorithms import BCQL, BCQLTrainer
-from osrl.common import TransitionDataset
-from osrl.common.dataset import process_bc_dataset
-from osrl.common.exp_util import auto_name, seed_all
-from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
-import re
+from tqdm.auto import trange  # noqa
 
+from configs.coptidice_configs import COptiDICE_DEFAULT_CONFIG, COptiDICETrainConfig
+from osrl.algorithms import BEARL, BEARLTrainer, COptiDICE, COptiDICETrainer
+from osrl.common import TransitionDataset
+from osrl.common.exp_util import auto_name, seed_all
+import re
 
 def load_npz_as_dict(path: str) -> dict:
     with np.load(path, allow_pickle=True) as f:
@@ -27,43 +28,51 @@ def load_npz_as_dict(path: str) -> dict:
     d.pop("poison_mask", None)
     return d
 
-@pyrallis.wrap()
-def train_poison_policy(args: BCQLTrainConfig):
-    cfg, old_cfg = asdict(args), asdict(BCQLTrainConfig())
-    differing = {k: cfg[k] for k in cfg if cfg[k] != old_cfg[k]}
-    cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]()); cfg.update(differing)
-    args = types.SimpleNamespace(**cfg)
-    
-    args.suffix = args.attack_type  # indicate poisoned training
 
+@pyrallis.wrap()
+def train_poison_policy(args: COptiDICETrainConfig):
+    # update config
+    cfg, old_cfg = asdict(args), asdict(COptiDICETrainConfig())
+    differing_values = {key: cfg[key] for key in cfg.keys() if cfg[key] != old_cfg[key]}
+    cfg = asdict(COptiDICE_DEFAULT_CONFIG[args.task]())
+    cfg.update(differing_values)
+    args = types.SimpleNamespace(**cfg)
+
+    # setup logger
+    default_cfg = asdict(COptiDICE_DEFAULT_CONFIG[args.task]())
     if args.name is None:
-        args.name = auto_name(asdict(BCQL_DEFAULT_CONFIG[args.task]()), cfg, args.prefix, args.suffix)
+        args.name = auto_name(default_cfg, cfg, args.prefix, args.suffix)
     if args.group is None:
         args.group = args.task + "-cost-" + str(int(args.cost_limit))
     if args.logdir is not None:
         args.logdir = os.path.join(args.logdir, args.group, args.name)
-
     logger = WandbLogger(cfg, args.project, args.group, args.name, args.logdir)
+    # logger = TensorboardLogger(args.logdir, log_txt=True, name=args.name)
     logger.save_config(cfg, verbose=args.verbose)
 
+    # set seed
     seed_all(args.seed)
     if args.device == "cpu":
         torch.set_num_threads(args.threads)
 
-    env = gym.make(args.task)
-    
+    # initialize environment
+    # if "Metadrive" in args.task:
+    #     import gym as classic_gym
+    #     env = classic_gym.make(args.task, disable_env_checker=True)
 
-    # poison_path = "save_data/offline_car_circle_poisoned_maxcost.npz"  # <- set your path
+    # else:
+    env = gym.make(args.task)
     task_name = re.sub(r'Offline', '', args.task)
     task_name = re.sub(r'Gymnasium', '', task_name)
+
     task_name = re.sub(r'-v\d+', '', task_name)
     poison_path = f"save_data/{task_name}_poisoned_{args.attack_type}.npz"
     assert os.path.exists(poison_path), f"Poison file not found: {poison_path}"
     data = load_npz_as_dict(poison_path)   # <-- poisoned-only
-
+    # pre-process offline dataset
     env.set_target_cost(args.cost_limit)
 
-    cbins = rbins = max_npb = min_npb = None
+    cbins, rbins, max_npb, min_npb = None, None, None, None
     if args.density != 1.0:
         density_cfg = DENSITY_CFG[args.task + "_density" + str(args.density)]
         cbins = density_cfg["cbins"]
@@ -81,62 +90,74 @@ def train_poison_policy(args: BCQLTrainConfig):
                                 max_npb=max_npb,
                                 min_npb=min_npb)
 
-     
+    # wrapper
     env = wrap_env(
-            env=env,
-            reward_scale=args.reward_scale,
-        )
+        env=env,
+        reward_scale=args.reward_scale,
+    )
     env = OfflineEnvWrapper(env)
-    # model & optimizer setup
-    model = BCQL(
+
+    # setup dataset
+    dataset = TransitionDataset(data,
+                                reward_scale=args.reward_scale,
+                                cost_scale=args.cost_scale,
+                                state_init=True)
+    trainloader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        num_workers=args.num_workers,
+    )
+    trainloader_iter = iter(trainloader)
+    init_s_propotion, obs_std, act_std = dataset.get_dataset_states()
+
+    # setup model
+    model = COptiDICE(
         state_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
         max_action=env.action_space.high[0],
+        f_type=args.f_type,
+        init_state_propotion=init_s_propotion,
+        observations_std=obs_std,
+        actions_std=act_std,
         a_hidden_sizes=args.a_hidden_sizes,
         c_hidden_sizes=args.c_hidden_sizes,
-        vae_hidden_sizes=args.vae_hidden_sizes,
-        sample_action_num=args.sample_action_num,
-        PID=args.PID,
         gamma=args.gamma,
-        tau=args.tau,
-        lmbda=args.lmbda,
-        beta=args.beta,
-        phi=args.phi,
-        num_q=args.num_q,
-        num_qc=args.num_qc,
+        alpha=args.alpha,
+        cost_ub_epsilon=args.cost_ub_epsilon,
+        num_nu=args.num_nu,
+        num_chi=args.num_chi,
         cost_limit=args.cost_limit,
         episode_len=args.episode_len,
         device=args.device,
     )
+
     print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
 
-    def checkpoint_fn(): return {"model_state": model.state_dict()}
+    def checkpoint_fn():
+        return {"model_state": model.state_dict()}
+
     logger.setup_checkpoint_fn(checkpoint_fn)
 
-    trainer = BCQLTrainer(model,
-                          env,
-                          logger=logger,
-                          actor_lr=args.actor_lr,
-                          critic_lr=args.critic_lr,
-                          vae_lr=args.vae_lr,
-                          reward_scale=args.reward_scale,
-                          cost_scale=args.cost_scale,
-                          device=args.device)
+    trainer = COptiDICETrainer(model,
+                               env,
+                               logger=logger,
+                               actor_lr=args.actor_lr,
+                               critic_lr=args.critic_lr,
+                               scalar_lr=args.scalar_lr,
+                               reward_scale=args.reward_scale,
+                               cost_scale=args.cost_scale,
+                               device=args.device)
 
-    trainloader = DataLoader(TransitionDataset(data,
-                                              reward_scale=args.reward_scale,
-                                              cost_scale=args.cost_scale),
-                             batch_size=args.batch_size, pin_memory=True, num_workers=args.num_workers)
-    trainloader_iter = iter(trainloader)
+    # for saving the best
+    best_reward = -np.inf
+    best_cost = np.inf
+    best_idx = 0
 
-    best_reward, best_cost, best_idx = -np.inf, np.inf, 0
     for step in trange(args.update_steps, desc="Training"):
         batch = next(trainloader_iter)
-        observations, next_observations, actions, rewards, costs, done = [
-            b.to(args.device) for b in batch
-        ]
-        trainer.train_one_step(observations, next_observations, actions, rewards, costs,
-                               done)
+        batch = [b.to(args.device) for b in batch]
+        trainer.train_one_step(batch)
 
         # evaluation
         if (step + 1) % args.eval_every == 0 or step == args.update_steps - 1:

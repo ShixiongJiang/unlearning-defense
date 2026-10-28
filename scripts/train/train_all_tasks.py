@@ -54,7 +54,7 @@ if __name__ == "__main__":
     policy = ["train_bc", "train_bcql", "train_bearl", "train_coptidice", "train_cpq"]
 
     # Do not write & to the end of the command, it will be added automatically.
-    template = "nohup python examples/train/{}.py --task {} --device cpu"
+    template = "nohup python scripts/train/{}.py --task {} --device cpu"
 
     train_instructions = runner.compose(template, [policy, task])
     runner.start(train_instructions, max_parallel=15)

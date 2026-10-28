@@ -11,7 +11,7 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-import unlearn_policy as runner
+from scripts.unlearn import unlearn_policy as runner
 from utils.unlearn_config import configure_unlearning
 
 

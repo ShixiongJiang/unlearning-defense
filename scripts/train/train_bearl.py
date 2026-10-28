@@ -1,6 +1,3 @@
-'''
-python train_bcql.py --task OfflineCarCircle-v0
-'''
 import os
 import uuid
 import types
@@ -19,23 +16,23 @@ from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange  # noqa
 
-from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
-from osrl.algorithms import BCQL, BCQLTrainer
+from configs.bearl_configs import BEARL_DEFAULT_CONFIG, BEARLTrainConfig
+from osrl.algorithms import BEARL, BEARLTrainer
 from osrl.common import TransitionDataset
 from osrl.common.exp_util import auto_name, seed_all
 
 
 @pyrallis.wrap()
-def train(args: BCQLTrainConfig):
+def train(args: BEARLTrainConfig):
     # update config
-    cfg, old_cfg = asdict(args), asdict(BCQLTrainConfig())
+    cfg, old_cfg = asdict(args), asdict(BEARLTrainConfig())
     differing_values = {key: cfg[key] for key in cfg.keys() if cfg[key] != old_cfg[key]}
-    cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
+    cfg = asdict(BEARL_DEFAULT_CONFIG[args.task]())
     cfg.update(differing_values)
     args = types.SimpleNamespace(**cfg)
 
     # setup logger
-    default_cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
+    default_cfg = asdict(BEARL_DEFAULT_CONFIG[args.task]())
     if args.name is None:
         args.name = auto_name(default_cfg, cfg, args.prefix, args.suffix)
     if args.group is None:
@@ -53,7 +50,10 @@ def train(args: BCQLTrainConfig):
 
     # initialize environment
     # if "Metadrive" in args.task:
-    #     import gym
+    #     import gym as classic_gym
+    #     env = classic_gym.make(args.task, disable_env_checker=True)
+
+    # else:
     env = gym.make(args.task)
 
     # pre-process offline dataset
@@ -86,7 +86,7 @@ def train(args: BCQLTrainConfig):
     env = OfflineEnvWrapper(env)
 
     # model & optimizer setup
-    model = BCQL(
+    model = BEARL(
         state_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
         max_action=env.action_space.high[0],
@@ -94,18 +94,28 @@ def train(args: BCQLTrainConfig):
         c_hidden_sizes=args.c_hidden_sizes,
         vae_hidden_sizes=args.vae_hidden_sizes,
         sample_action_num=args.sample_action_num,
-        PID=args.PID,
         gamma=args.gamma,
         tau=args.tau,
-        lmbda=args.lmbda,
         beta=args.beta,
-        phi=args.phi,
+        lmbda=args.lmbda,
+        mmd_sigma=args.mmd_sigma,
+        target_mmd_thresh=args.target_mmd_thresh,
+        start_update_policy_step=args.start_update_policy_step,
         num_q=args.num_q,
         num_qc=args.num_qc,
+        PID=args.PID,
         cost_limit=args.cost_limit,
         episode_len=args.episode_len,
         device=args.device,
     )
+    if args.resume_path is not None:
+        if not os.path.isfile(args.resume_path):
+            raise FileNotFoundError(f"Warm-start checkpoint not found: {args.resume_path}")
+        checkpoint = torch.load(args.resume_path, map_location=args.device)
+        if "model_state" not in checkpoint:
+            raise KeyError(f"Checkpoint has no model_state: {args.resume_path}")
+        model.load_state_dict(checkpoint["model_state"])
+        print(f"Warm-started BEARL from {args.resume_path}")
     print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
 
     def checkpoint_fn():
@@ -114,15 +124,15 @@ def train(args: BCQLTrainConfig):
     logger.setup_checkpoint_fn(checkpoint_fn)
 
     # trainer
-    trainer = BCQLTrainer(model,
-                          env,
-                          logger=logger,
-                          actor_lr=args.actor_lr,
-                          critic_lr=args.critic_lr,
-                          vae_lr=args.vae_lr,
-                          reward_scale=args.reward_scale,
-                          cost_scale=args.cost_scale,
-                          device=args.device)
+    trainer = BEARLTrainer(model,
+                           env,
+                           logger=logger,
+                           actor_lr=args.actor_lr,
+                           critic_lr=args.critic_lr,
+                           vae_lr=args.vae_lr,
+                           reward_scale=args.reward_scale,
+                           cost_scale=args.cost_scale,
+                           device=args.device)
 
     # initialize pytorch dataloader
     dataset = TransitionDataset(data,
@@ -140,6 +150,22 @@ def train(args: BCQLTrainConfig):
     best_reward = -np.inf
     best_cost = np.inf
     best_idx = 0
+    if args.resume_path is not None:
+        # Evaluate and preserve the source policy before any fine-tuning update.
+        # This prevents a worse first evaluation from replacing it as model_best.
+        ret, cost, length = trainer.evaluate(args.eval_episodes)
+        best_reward, best_cost, best_idx = ret, cost, -1
+        logger.store(tab="eval", Cost=cost, Reward=ret, Length=length)
+        logger.save_checkpoint(suffix="best")
+        logger.store(tab="train", best_idx=best_idx)
+        logger.write(0, display=False)
+        print(f"Warm-start evaluation: cost={cost:.4f}, reward={ret:.4f}")
+        if args.target_cost is not None and cost <= args.target_cost:
+            print(
+                f"Target cost reached by warm-start policy: {cost:.4f} <= "
+                f"{args.target_cost:.4f}."
+            )
+            return
 
     # training
     for step in trange(args.update_steps, desc="Training"):
@@ -166,6 +192,13 @@ def train(args: BCQLTrainConfig):
 
             logger.store(tab="train", best_idx=best_idx)
             logger.write(step, display=False)
+
+            if args.target_cost is not None and cost <= args.target_cost:
+                print(
+                    f"Target cost reached at update {step + 1}: {cost:.4f} <= "
+                    f"{args.target_cost:.4f}."
+                )
+                break
 
         else:
             logger.write_without_reset(step)

@@ -1,63 +1,69 @@
-import os
-import uuid
-import types
-from dataclasses import asdict, dataclass
-from typing import Any, DefaultDict, Dict, List, Optional, Tuple
+''''
+python scripts/poison/train_poison_policy_bcql.py --task OfflineCarCircle-v0   --attack_type max_cost
+'''
 
-import bullet_safety_gym  # noqa
-import dsrl
-import gymnasium as gym  # noqa
+
+import os, types
+from dataclasses import asdict
 import numpy as np
-import pyrallis
-import torch
+import torch, pyrallis, gymnasium as gym
+import bullet_safety_gym, dsrl  # register envs
 from dsrl.infos import DENSITY_CFG
-from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
 from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
-from tqdm.auto import trange  # noqa
-
-from examples.configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
+from tqdm.auto import trange
+from configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
 from osrl.algorithms import BCQL, BCQLTrainer
 from osrl.common import TransitionDataset
+from osrl.common.dataset import process_bc_dataset
 from osrl.common.exp_util import auto_name, seed_all
+from dsrl.offline_env import OfflineEnvWrapper, wrap_env  # noqa
+import re
 
+
+def load_npz_as_dict(path: str) -> dict:
+    with np.load(path, allow_pickle=True) as f:
+        d = {k: f[k] for k in f.files}
+    d.pop("poison_mask", None)
+    return d
 
 @pyrallis.wrap()
-def train(args: BCQLTrainConfig):
-    # update config
+def train_poison_policy(args: BCQLTrainConfig):
     cfg, old_cfg = asdict(args), asdict(BCQLTrainConfig())
-    differing_values = {key: cfg[key] for key in cfg.keys() if cfg[key] != old_cfg[key]}
-    cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
-    cfg.update(differing_values)
+    differing = {k: cfg[k] for k in cfg if cfg[k] != old_cfg[k]}
+    cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]()); cfg.update(differing)
     args = types.SimpleNamespace(**cfg)
+    
+    args.suffix = args.attack_type  # indicate poisoned training
 
-    # setup logger
-    default_cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
     if args.name is None:
-        args.name = auto_name(default_cfg, cfg, args.prefix, args.suffix)
+        args.name = auto_name(asdict(BCQL_DEFAULT_CONFIG[args.task]()), cfg, args.prefix, args.suffix)
     if args.group is None:
         args.group = args.task + "-cost-" + str(int(args.cost_limit))
     if args.logdir is not None:
         args.logdir = os.path.join(args.logdir, args.group, args.name)
+
     logger = WandbLogger(cfg, args.project, args.group, args.name, args.logdir)
-    # logger = TensorboardLogger(args.logdir, log_txt=True, name=args.name)
     logger.save_config(cfg, verbose=args.verbose)
 
-    # set seed
     seed_all(args.seed)
     if args.device == "cpu":
         torch.set_num_threads(args.threads)
 
-    # initialize environment
-    if "Metadrive" in args.task:
-        import gym
     env = gym.make(args.task)
+    
 
-    # pre-process offline dataset
-    data = env.get_dataset()
+    # poison_path = "save_data/offline_car_circle_poisoned_maxcost.npz"  # <- set your path
+    task_name = re.sub(r'Offline', '', args.task)
+    task_name = re.sub(r'Gymnasium', '', task_name)
+    task_name = re.sub(r'-v\d+', '', task_name)
+    poison_path = f"save_data/{task_name}_poisoned_{args.attack_type}.npz"
+    assert os.path.exists(poison_path), f"Poison file not found: {poison_path}"
+    data = load_npz_as_dict(poison_path)   # <-- poisoned-only
+
     env.set_target_cost(args.cost_limit)
 
-    cbins, rbins, max_npb, min_npb = None, None, None, None
+    cbins = rbins = max_npb = min_npb = None
     if args.density != 1.0:
         density_cfg = DENSITY_CFG[args.task + "_density" + str(args.density)]
         cbins = density_cfg["cbins"]
@@ -75,13 +81,12 @@ def train(args: BCQLTrainConfig):
                                 max_npb=max_npb,
                                 min_npb=min_npb)
 
-    # wrapper
+     
     env = wrap_env(
-        env=env,
-        reward_scale=args.reward_scale,
-    )
+            env=env,
+            reward_scale=args.reward_scale,
+        )
     env = OfflineEnvWrapper(env)
-
     # model & optimizer setup
     model = BCQL(
         state_dim=env.observation_space.shape[0],
@@ -105,12 +110,9 @@ def train(args: BCQLTrainConfig):
     )
     print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
 
-    def checkpoint_fn():
-        return {"model_state": model.state_dict()}
-
+    def checkpoint_fn(): return {"model_state": model.state_dict()}
     logger.setup_checkpoint_fn(checkpoint_fn)
 
-    # trainer
     trainer = BCQLTrainer(model,
                           env,
                           logger=logger,
@@ -121,24 +123,13 @@ def train(args: BCQLTrainConfig):
                           cost_scale=args.cost_scale,
                           device=args.device)
 
-    # initialize pytorch dataloader
-    dataset = TransitionDataset(data,
-                                reward_scale=args.reward_scale,
-                                cost_scale=args.cost_scale)
-    trainloader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        pin_memory=True,
-        num_workers=args.num_workers,
-    )
+    trainloader = DataLoader(TransitionDataset(data,
+                                              reward_scale=args.reward_scale,
+                                              cost_scale=args.cost_scale),
+                             batch_size=args.batch_size, pin_memory=True, num_workers=args.num_workers)
     trainloader_iter = iter(trainloader)
 
-    # for saving the best
-    best_reward = -np.inf
-    best_cost = np.inf
-    best_idx = 0
-
-    # training
+    best_reward, best_cost, best_idx = -np.inf, np.inf, 0
     for step in trange(args.update_steps, desc="Training"):
         batch = next(trainloader_iter)
         observations, next_observations, actions, rewards, costs, done = [
@@ -169,4 +160,4 @@ def train(args: BCQLTrainConfig):
 
 
 if __name__ == "__main__":
-    train()
+    train_poison_policy()

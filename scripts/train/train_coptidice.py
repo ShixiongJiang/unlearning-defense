@@ -16,7 +16,7 @@ from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange  # noqa
 
-from examples.configs.coptidice_configs import (COptiDICE_DEFAULT_CONFIG,
+from configs.coptidice_configs import (COptiDICE_DEFAULT_CONFIG,
                                                 COptiDICETrainConfig)
 from osrl.algorithms import COptiDICE, COptiDICETrainer
 from osrl.common import TransitionDataset

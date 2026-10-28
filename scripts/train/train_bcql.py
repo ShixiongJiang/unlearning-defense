@@ -1,3 +1,6 @@
+'''
+python scripts/train/train_bcql.py --task OfflineCarCircle-v0
+'''
 import os
 import uuid
 import types
@@ -16,23 +19,23 @@ from fsrl.utils import WandbLogger
 from torch.utils.data import DataLoader
 from tqdm.auto import trange  # noqa
 
-from examples.configs.cpq_configs import CPQ_DEFAULT_CONFIG, CPQTrainConfig
-from osrl.algorithms import CPQ, CPQTrainer
+from configs.bcql_configs import BCQL_DEFAULT_CONFIG, BCQLTrainConfig
+from osrl.algorithms import BCQL, BCQLTrainer
 from osrl.common import TransitionDataset
 from osrl.common.exp_util import auto_name, seed_all
 
 
 @pyrallis.wrap()
-def train(args: CPQTrainConfig):
+def train(args: BCQLTrainConfig):
     # update config
-    cfg, old_cfg = asdict(args), asdict(CPQTrainConfig())
+    cfg, old_cfg = asdict(args), asdict(BCQLTrainConfig())
     differing_values = {key: cfg[key] for key in cfg.keys() if cfg[key] != old_cfg[key]}
-    cfg = asdict(CPQ_DEFAULT_CONFIG[args.task]())
+    cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
     cfg.update(differing_values)
     args = types.SimpleNamespace(**cfg)
 
     # setup logger
-    default_cfg = asdict(CPQ_DEFAULT_CONFIG[args.task]())
+    default_cfg = asdict(BCQL_DEFAULT_CONFIG[args.task]())
     if args.name is None:
         args.name = auto_name(default_cfg, cfg, args.prefix, args.suffix)
     if args.group is None:
@@ -50,14 +53,8 @@ def train(args: CPQTrainConfig):
 
     # initialize environment
     # if "Metadrive" in args.task:
-    #     import gym as classic_gym
-    #     env = classic_gym.make(args.task, disable_env_checker=True)
-
-    # else:
+    #     import gym
     env = gym.make(args.task)
-    
- 
-    # env = gym.make(args.task, )
 
     # pre-process offline dataset
     data = env.get_dataset()
@@ -89,7 +86,7 @@ def train(args: CPQTrainConfig):
     env = OfflineEnvWrapper(env)
 
     # model & optimizer setup
-    model = CPQ(
+    model = BCQL(
         state_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
         max_action=env.action_space.high[0],
@@ -97,12 +94,14 @@ def train(args: CPQTrainConfig):
         c_hidden_sizes=args.c_hidden_sizes,
         vae_hidden_sizes=args.vae_hidden_sizes,
         sample_action_num=args.sample_action_num,
+        PID=args.PID,
         gamma=args.gamma,
         tau=args.tau,
+        lmbda=args.lmbda,
         beta=args.beta,
+        phi=args.phi,
         num_q=args.num_q,
         num_qc=args.num_qc,
-        qc_scalar=args.qc_scalar,
         cost_limit=args.cost_limit,
         episode_len=args.episode_len,
         device=args.device,
@@ -114,17 +113,18 @@ def train(args: CPQTrainConfig):
 
     logger.setup_checkpoint_fn(checkpoint_fn)
 
-    trainer = CPQTrainer(model,
-                         env,
-                         logger=logger,
-                         actor_lr=args.actor_lr,
-                         critic_lr=args.critic_lr,
-                         alpha_lr=args.alpha_lr,
-                         vae_lr=args.vae_lr,
-                         reward_scale=args.reward_scale,
-                         cost_scale=args.cost_scale,
-                         device=args.device)
+    # trainer
+    trainer = BCQLTrainer(model,
+                          env,
+                          logger=logger,
+                          actor_lr=args.actor_lr,
+                          critic_lr=args.critic_lr,
+                          vae_lr=args.vae_lr,
+                          reward_scale=args.reward_scale,
+                          cost_scale=args.cost_scale,
+                          device=args.device)
 
+    # initialize pytorch dataloader
     dataset = TransitionDataset(data,
                                 reward_scale=args.reward_scale,
                                 cost_scale=args.cost_scale)
@@ -141,6 +141,7 @@ def train(args: CPQTrainConfig):
     best_cost = np.inf
     best_idx = 0
 
+    # training
     for step in trange(args.update_steps, desc="Training"):
         batch = next(trainloader_iter)
         observations, next_observations, actions, rewards, costs, done = [

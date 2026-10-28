@@ -1,3 +1,11 @@
+'''
+eval the clean BCQL model:
+python scripts/eval/eval_cdt.py --path logs/OfflineCarCircle-v0-cost-10/CDT-84de/CDT-84de --eval_episodes 20
+
+eval the poisoned BCQL model:
+python scripts/eval/eval_cdt.py --path logs/OfflineCarCircle-v0-cost-10/CDT_poisoned_maxcost-87ba/CDT_poisoned_maxcost-87ba --eval_episodes 20
+'''
+
 from dataclasses import asdict, dataclass
 from typing import Any, DefaultDict, Dict, List, Optional, Tuple
 
@@ -19,7 +27,7 @@ class EvalConfig:
     costs: List[float] = field(default=[10, 10, 10], is_mutable=True)
     noise_scale: List[float] = None
     eval_episodes: int = 20
-    best: bool = False
+    best: bool = True
     device: str = "cpu"
     threads: int = 4
 
