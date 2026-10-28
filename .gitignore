@@ -1,11 +1,28 @@
-/examples/__pycache__/
-/save_data
-/wandb
+# Python
+__pycache__/
+*.py[cod]
+
+# Vendored dependency (see patches/ and README)
 /OSRL
+
+# Experiment outputs and results
 /logs
-outliersNone_noiseNone_inpaintNone_epsilonNone.png
-/OSRL
-launch_task.job*
-/job_dir/*
-/unlearn_logs/*
-/utils/__pycache__/
+/wandb
+/save_data
+/job_dir/
+/unlearn_logs/
+/new_unlearn_logs/
+/rebuttal/
+/utils/figure/
+/*.png
+
+# Cluster job submission files
+*.job
+*.job.*
+
+# Editor / tool state
+.vscode/
+.codex
+.agents/
+.aws/
+.claude/

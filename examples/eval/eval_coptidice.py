@@ -62,7 +62,17 @@ def eval(args: EvalConfig):
         episode_len=cfg["episode_len"],
         device=args.device,
     )
-    coptidice_model.load_state_dict(model["model_state"])
+    incompatible = coptidice_model.load_state_dict(model["model_state"], strict=False)
+    missing = set(incompatible.missing_keys)
+    unexpected = set(incompatible.unexpected_keys)
+    invalid_missing = missing - {"tau", "lmbda"}
+    if invalid_missing or unexpected:
+        raise RuntimeError(
+            "Incompatible COptiDICE checkpoint: "
+            f"missing={sorted(invalid_missing)}, unexpected={sorted(unexpected)}"
+        )
+    if missing:
+        print("Loaded legacy COptiDICE checkpoint without persisted tau/lmbda.")
     coptidice_model.to(args.device)
     trainer = COptiDICETrainer(coptidice_model,
                                env,

@@ -12,6 +12,7 @@ from osrl.algorithms import (
     BCQLTrainer,
     CPQTrainer,
 )
+from utils.unlearn_config import DEFAULT_UNLEARN, resolve_unlearn_hyperparameters
 
 # ── shared utilities ──────────────────────────────────────────────────────────
 
@@ -44,38 +45,36 @@ def _multihead_huber(target, q_list):
     return sum(F.smooth_l1_loss(q, target) for q in q_list) / len(q_list)
 
 
-def _init_unlearn_state(obj):
+def _init_unlearn_state(obj, hyperparameters=None):
     """Lazily initialise CPQ-style unlearning state on the trainer. Idempotent."""
+    hp = hyperparameters or resolve_unlearn_hyperparameters(obj)
+    obj._active_unlearn_config = hp
     if not hasattr(obj, "_F_keep_actor") or obj._F_keep_actor is None:
         obj._F_keep_actor = None
-    if not hasattr(obj, "_F_keep_beta"):
-        obj._F_keep_beta = 0.99
-    if not hasattr(obj, "_F_keep_cprime"):
-        obj._F_keep_cprime = 1e-3
+    obj._F_keep_beta = hp.fisher_beta
+    obj._F_keep_cprime = hp.fisher_damping
     if not hasattr(obj, "_gn_ema"):
         obj._gn_ema = {"keep": 1.0, "forget": 1.0}
     if not hasattr(obj, "_eta_forget"):
-        obj._eta_forget = 0.1
-    if not hasattr(obj, "_eta_beta"):
-        obj._eta_beta = 0.9
-    if not hasattr(obj, "_eta_min"):
-        obj._eta_min = 0.01
-    if not hasattr(obj, "_eta_max"):
-        obj._eta_max = 1.0
+        obj._eta_forget = hp.eta_initial
+    obj._eta_beta = hp.eta_beta
+    obj._eta_min = hp.eta_min
+    obj._eta_max = hp.eta_max
     if not hasattr(obj, "_forget_cost_target"):
         obj._forget_cost_target = None
 
 
 def _normalise_and_pcgrad(obj, g_keep, g_forget):
     """EMA-normalise both gradient sets, then PCGrad-project g_forget."""
-    gn_beta = 0.95
+    hp = getattr(obj, "_active_unlearn_config", DEFAULT_UNLEARN)
+    gn_beta = hp.grad_norm_beta
     with torch.no_grad():
         nk = float(_grad_l2(g_keep).cpu())
         nf = float(_grad_l2(g_forget).cpu())
         obj._gn_ema["keep"] = gn_beta * obj._gn_ema["keep"] + (1 - gn_beta) * nk
         obj._gn_ema["forget"] = gn_beta * obj._gn_ema["forget"] + (1 - gn_beta) * nf
-    g_keep = [g / max(obj._gn_ema["keep"], 1e-3) for g in g_keep]
-    g_forget = [g / max(obj._gn_ema["forget"], 1e-3) for g in g_forget]
+    g_keep = [g / max(obj._gn_ema["keep"], hp.grad_norm_floor) for g in g_keep]
+    g_forget = [g / max(obj._gn_ema["forget"], hp.grad_norm_floor) for g in g_forget]
     dkf = _dot(g_keep, g_forget)
     if dkf < 0:
         proj = dkf / _norm2(g_keep)
@@ -83,12 +82,14 @@ def _normalise_and_pcgrad(obj, g_keep, g_forget):
     return g_keep, g_forget
 
 
-def _fisher_scale_forget(obj, actor_params, g_keep, g_forget, clip=0.05):
+def _fisher_scale_forget(obj, actor_params, g_keep, g_forget, clip=None):
     """Dampen g_forget where keep curvature is high via Fisher EMA diagonal."""
     if obj._F_keep_actor is None:
         obj._F_keep_actor = [torch.zeros_like(g) for g in g_keep]
     beta = float(obj._F_keep_beta)
     cprime = float(obj._F_keep_cprime)
+    if clip is None:
+        clip = getattr(obj, "_active_unlearn_config", DEFAULT_UNLEARN).fisher_clip
     with torch.no_grad():
         for i in range(len(actor_params)):
             obj._F_keep_actor[i] = beta * obj._F_keep_actor[i] + (1 - beta) * (
@@ -103,9 +104,10 @@ def _fisher_scale_forget(obj, actor_params, g_keep, g_forget, clip=0.05):
 def _update_eta(obj, gap):
     """
     Adaptive eta_forget (CPQ design).
-    gap > 0: cost target not yet reached → more forgetting needed → higher eta.
+    A positive gap increases the forgetting-gradient weight.
     """
-    eta_score = torch.sigmoid(torch.tensor(gap / 0.25, dtype=torch.float32)).item()
+    temperature = getattr(obj, "_active_unlearn_config", DEFAULT_UNLEARN).eta_temperature
+    eta_score = torch.sigmoid(torch.tensor(gap / temperature, dtype=torch.float32)).item()
     eta_target = obj._eta_min + (obj._eta_max - obj._eta_min) * eta_score
     obj._eta_forget = obj._eta_beta * obj._eta_forget + (1 - obj._eta_beta) * eta_target
     return float(max(obj._eta_min, min(obj._eta_max, obj._eta_forget)))
@@ -115,24 +117,45 @@ def _actor_step(obj, actor_params, g_keep, g_forget_scaled, eta_forget, max_grad
     """Apply combined keep + eta·forget gradient and step the actor optimiser."""
     obj.model.actor_optim.zero_grad(set_to_none=True)
     for p, gk, gf in zip(actor_params, g_keep, g_forget_scaled):
-        # p.grad = gk + eta_forget * gf
-        p.grad = gk + gf
+        p.grad = gk + eta_forget * gf
     if max_grad_norm > 0:
         torch.nn.utils.clip_grad_norm_(actor_params, max_grad_norm)
     obj.model.actor_optim.step()
+
+
+def _validate_unlearn_controls(cost_forget_scale, eta_mode, eta_fixed):
+    resolve_unlearn_hyperparameters(None, cost_forget_scale=cost_forget_scale,
+                                   eta_mode=eta_mode, eta_fixed=eta_fixed)
+
+
+def _forget_actor_objective(q_value, cost_value, safe_threshold,
+                            cost_forget_scale=DEFAULT_UNLEARN.cost_forget_scale, *, temperature=None):
+    """Choose rewarding actions with low predicted cost.
+
+    Forgetting labels belongs to the critics at the DATA actions. The actor
+    should avoid actions the cost critic marks unsafe, rather than
+    maximize their predicted cost or minimize their predicted reward.
+    """
+    temperature = DEFAULT_UNLEARN.cost_forget_temperature if temperature is None else temperature
+    safe = (cost_value <= safe_threshold).to(q_value.dtype)
+    reward_loss = -(safe * q_value).mean()
+    cost_loss = F.softplus((cost_value - safe_threshold) / temperature).mean()
+    return reward_loss + cost_forget_scale * cost_loss, reward_loss, cost_loss
+
+
+def _effective_eta(obj, gap, eta_mode, eta_fixed):
+    return _update_eta(obj, gap) if eta_mode == "adaptive" else float(eta_fixed)
 
 
 # ── BC ────────────────────────────────────────────────────────────────────────
 
 
 class BCTrainerWithUnlearn(BCTrainer):
-    """BC unlearning following CPQ's actor-update design.
+    """Retain cloning while reducing imitation of forgotten actions.
 
-    Since BC has no critics, action displacement from forget data serves as
-    the cost proxy:
-      loss_forget_cost  ←→  softplus(target_dist − dist_f)  push actions away
-      loss_forget_q     ←→  −dist_f.mean()                  maximise separation
-    Adaptive eta uses (dist_f − target) as the gap signal.
+    BC has no cost critic. Action displacement is a forgetting proxy, not a
+    prediction of environmental cost. Adaptive eta emphasizes an unmet
+    displacement target.
     """
 
     def trajdeleter_unlearn_one_step(
@@ -140,15 +163,26 @@ class BCTrainerWithUnlearn(BCTrainer):
         batch_forget,
         batch_keep,
         *,
-        alpha_pg_keep=1.0,
+        alpha_pg_keep=None,
         update_targets=False,
-        max_grad_norm=1.0,
+        max_grad_norm=None,
         use_policy_gradient=True,
         unlearn_method="safe",
+        cost_forget_scale=None,
+        eta_mode=None,
+        eta_fixed=None,
         **kwargs,
     ):
         device = self.device
-        _init_unlearn_state(self)
+        if "lambda_cost" in kwargs:
+            raise TypeError("Use cost_forget_scale instead of lambda_cost")
+        hp = resolve_unlearn_hyperparameters(
+            self, alpha_pg_keep=alpha_pg_keep, max_grad_norm=max_grad_norm,
+            cost_forget_scale=cost_forget_scale, eta_mode=eta_mode,
+            eta_fixed=eta_fixed)
+        alpha_pg_keep, max_grad_norm = hp.alpha_pg_keep, hp.max_grad_norm
+        cost_forget_scale = 0.0 if unlearn_method == "reward-only" else hp.cost_forget_scale
+        _init_unlearn_state(self, hp)
 
         obs_f, act_f = [b.to(device) for b in batch_forget]
         obs_k, act_k = [b.to(device) for b in batch_keep]
@@ -162,16 +196,15 @@ class BCTrainerWithUnlearn(BCTrainer):
 
         # ── KEEP ─────────────────────────────────────────────────────────────
         loss_keep = F.mse_loss(act_k_pi, act_k.detach())
-        keep_total = alpha_pg_keep * loss_keep
+        keep_total = alpha_pg_keep * hp.keep_bc_weight * loss_keep
 
-        # ── FORGET (CPQ-style, critic-free) ──────────────────────────────────
-        # Action displacement plays the role of the cost signal:
-        # high dist = "unsafe" (already forgotten) → softplus satisfied.
+        # ── FORGET: action-displacement proxy, without cost observations ──────
         dist_f = ((act_f_pi - act_f.detach()) ** 2).mean(dim=-1)
-        forget_dist_target = 0.10
-        loss_forget_cost = F.softplus((forget_dist_target - dist_f) / 0.05).mean()
+        forget_dist_target = hp.bc_forget_distance_target
+        loss_forget_cost = F.softplus(
+            (forget_dist_target - dist_f) / hp.bc_forget_temperature).mean()
         loss_forget_q = -dist_f.mean()
-        forget_total = loss_forget_cost + loss_forget_q
+        forget_total = cost_forget_scale * loss_forget_cost + loss_forget_q
 
         # ── PCGrad + Fisher + adaptive eta ────────────────────────────────────
         g_keep = torch.autograd.grad(
@@ -183,10 +216,8 @@ class BCTrainerWithUnlearn(BCTrainer):
         g_keep, g_forget = _normalise_and_pcgrad(self, g_keep, g_forget)
         g_forget_scaled = _fisher_scale_forget(self, actor_params, g_keep, g_forget)
 
-        if self._forget_cost_target is None:
-            self._forget_cost_target = forget_dist_target
-        gap = float(dist_f.mean().detach().cpu()) - self._forget_cost_target
-        eta_forget = _update_eta(self, gap)
+        gap = forget_dist_target - float(dist_f.mean().detach().cpu())
+        eta_forget = _effective_eta(self, gap, hp.eta_mode, hp.eta_fixed)
 
         _actor_step(
             self, actor_params, g_keep, g_forget_scaled, eta_forget, max_grad_norm
@@ -194,6 +225,8 @@ class BCTrainerWithUnlearn(BCTrainer):
 
         return {
             "eta_forget": eta_forget,
+            "eta_effective": eta_forget,
+            "cost_forget_scale": cost_forget_scale,
             "loss_keep": float(loss_keep.detach().cpu()),
             "loss_forget_cost": float(loss_forget_cost.detach().cpu()),
             "loss_forget_q": float(loss_forget_q.detach().cpu()),
@@ -208,19 +241,11 @@ class BCTrainerWithUnlearn(BCTrainer):
 
  
 class CDTTrainerWithUnlearn(CDTTrainer):
-    """CDT unlearning aligned with CDTTrainer.train_one_step.
- 
-    Keep loss mirrors train_one_step exactly: act_loss + cost_weight*cost_loss
-    + state_weight*state_loss, protecting all three prediction heads.
- 
-    Forget loss uses CDT's built-in cost_pred_head as the Qc analog (CPQ
-    mapping):
-      loss_forget_cost  push cost_pred_f toward class 1 (high-cost) — same
-                        role as softplus(target − cq_f) in CPQ
-      loss_forget_q     push action predictions away from forget actions —
-                        same role as q_f.mean() (gradient descent on reward)
-    Adaptive eta is driven by the model's own cost-class-1 confidence on
-    forget states, mirroring CPQ's (cq_f − target) gap signal.
+    """CDT unlearning with native prediction heads and auxiliary weights.
+
+    Retain losses average features and valid sequence tokens. Forgotten data
+    actions are assigned the unsafe cost class while their imitation is suppressed.
+    The cost-class confidence is a forgetting proxy, not a trajectory cost.
     """
  
     def _get_max_timestep_index(self):
@@ -237,6 +262,13 @@ class CDTTrainerWithUnlearn(CDTTrainer):
             "Could not find CDT timestep embedding on self.model. "
             "Adapt _get_max_timestep_index() to your CDT implementation."
         )
+
+    @staticmethod
+    def _masked_token_mean(values, mask):
+        """Average feature dimensions, then average only valid tokens."""
+        if values.ndim > mask.ndim:
+            values = values.flatten(start_dim=mask.ndim).mean(dim=-1)
+        return (values * mask).sum() / mask.sum().clamp_min(1.0)
  
     def _sanitize_seq_batch(
         self,
@@ -257,9 +289,14 @@ class CDTTrainerWithUnlearn(CDTTrainer):
         episode_cost = torch.nan_to_num(episode_cost.to(device).float())
         costs = torch.nan_to_num(costs.to(device).float())
         mask = (mask.to(device) > 0).float()
+        if not bool((mask.sum(dim=-1) > 0).all()):
+            raise ValueError("Each CDT sequence must contain at least one valid token")
         time_steps = time_steps.to(device).long()
         time_steps = time_steps.masked_fill(mask == 0, 0)
-        time_steps = time_steps.clamp_(0, self._get_max_timestep_index())
+        if getattr(self.model, "time_emb", True):
+            time_steps = time_steps.clamp_(0, self._get_max_timestep_index())
+        else:
+            time_steps = torch.zeros_like(time_steps)
         return (
             states,
             actions,
@@ -276,15 +313,26 @@ class CDTTrainerWithUnlearn(CDTTrainer):
         batch_forget,
         batch_keep,
         *,
-        alpha_pg_keep=1.0,
+        alpha_pg_keep=None,
         update_targets=False,
-        max_grad_norm=1.0,
+        max_grad_norm=None,
         use_policy_gradient=True,
         unlearn_method="safe",
+        cost_forget_scale=None,
+        eta_mode=None,
+        eta_fixed=None,
         **kwargs,
     ):
         device = self.device
-        _init_unlearn_state(self)
+        if "lambda_cost" in kwargs:
+            raise TypeError("Use cost_forget_scale instead of lambda_cost")
+        hp = resolve_unlearn_hyperparameters(
+            self, alpha_pg_keep=alpha_pg_keep, max_grad_norm=max_grad_norm,
+            cost_forget_scale=cost_forget_scale, eta_mode=eta_mode,
+            eta_fixed=eta_fixed)
+        alpha_pg_keep, max_grad_norm = hp.alpha_pg_keep, hp.max_grad_norm
+        cost_forget_scale = 0.0 if unlearn_method == "reward-only" else hp.cost_forget_scale
+        _init_unlearn_state(self, hp)
  
         s_f, a_f, rtg_f, ctg_f, ts_f, mask_f, ec_f, costs_f = self._sanitize_seq_batch(
             *batch_forget
@@ -299,7 +347,7 @@ class CDTTrainerWithUnlearn(CDTTrainer):
         params = [p for p in self.model.parameters() if p.requires_grad]
  
         # ════════════════════════════════════════════════════════════════════
-        # KEEP: mirror train_one_step exactly so all three heads are protected
+        # KEEP: native auxiliary weights, averaged over features and valid tokens
         # ════════════════════════════════════════════════════════════════════
         act_pred_k, cost_pred_k, state_pred_k = self.model(
             states=s_k,
@@ -320,35 +368,30 @@ class CDTTrainerWithUnlearn(CDTTrainer):
             act_loss_k = -(logp_k + ent_reg * keep_entropy)
         else:
             act_loss_k = F.mse_loss(act_pred_k, a_k.detach(), reduction="none")
-            act_loss_k = (
-                act_loss_k * mask_k.unsqueeze(-1)
-            ).sum() / mask_k.sum().clamp_min(1.0)
+            act_loss_k = self._masked_token_mean(act_loss_k, mask_k)
  
         # Cost classification loss (NLL over 2 classes, same as train_one_step)
         cost_pred_k_flat = cost_pred_k.reshape(-1, 2)
         costs_k_flat = costs_k.flatten().long().detach()
         cost_loss_k = F.nll_loss(cost_pred_k_flat, costs_k_flat, reduction="none")
-        cost_loss_k = (cost_loss_k * mask_k.flatten()).sum() / mask_k.sum().clamp_min(
-            1.0
-        )
+        cost_loss_k = self._masked_token_mean(cost_loss_k, mask_k.flatten())
  
-        # State prediction loss (same as train_one_step)
+        # Predict a next state only when both adjacent tokens are valid.
         state_loss_k = F.mse_loss(
             state_pred_k[:, :-1], s_k[:, 1:].detach(), reduction="none"
         )
-        state_loss_k = (state_loss_k * mask_k[:, :-1].unsqueeze(-1)).sum() / mask_k[
-            :, :-1
-        ].sum().clamp_min(1.0)
+        state_loss_k = self._masked_token_mean(
+            state_loss_k, mask_k[:, :-1] * mask_k[:, 1:])
  
         loss_keep = (
-            act_loss_k
+            hp.keep_bc_weight * act_loss_k
             + self.cost_weight * cost_loss_k
             + self.state_weight * state_loss_k
         )
         keep_total = alpha_pg_keep * loss_keep
  
         # ════════════════════════════════════════════════════════════════════
-        # FORGET: CPQ-style using CDT's built-in cost_pred_head as Qc proxy
+        # FORGET: cost classification at data actions and reduced imitation
         # ════════════════════════════════════════════════════════════════════
         act_pred_f, cost_pred_f, _ = self.model(
             states=s_f,
@@ -360,36 +403,29 @@ class CDTTrainerWithUnlearn(CDTTrainer):
             episode_cost=ec_f,
         )
  
-        # loss_forget_cost: push cost_pred_f toward class 1 (high cost) —
-        # CPQ analog: softplus((target − cq_f) / 0.25), satisfied when cq_f
-        # is high.  Here: NLL with all targets = 1 forces the model to predict
-        # "this is a costly transition" for every forget step.
-        # cost_pred_f is already log_softmax, so NLL = -log_softmax[:,1].
+        # Reverse-cost models encode unsafe data as class 0 instead of class 1.
+        unsafe_cost_class = 0 if self.cost_reverse else 1
         cost_pred_f_flat = cost_pred_f.reshape(-1, 2)
-        high_cost_targets = torch.ones(
-            cost_pred_f_flat.shape[0], dtype=torch.long, device=device
-        )
+        high_cost_targets = torch.full(
+            (cost_pred_f_flat.shape[0],), unsafe_cost_class,
+            dtype=torch.long, device=device)
         loss_forget_cost_raw = F.nll_loss(
             cost_pred_f_flat, high_cost_targets, reduction="none"
         )
-        loss_forget_cost = (
-            loss_forget_cost_raw * mask_f.flatten()
-        ).sum() / mask_f.sum().clamp_min(1.0)
+        loss_forget_cost = self._masked_token_mean(
+            loss_forget_cost_raw, mask_f.flatten())
  
-        # loss_forget_q: push action predictions away from forget actions —
-        # CPQ analog: q_f.mean() (descent on reward for forget states).
+        # Action suppression proxy: reduce imitation of forgotten actions.
         # Stochastic: minimise log-prob of original forget actions = reduce
         # the policy's probability on those exact actions.
         # Deterministic: maximise MSE from forget actions = same semantics.
         if self.stochastic:
             loss_forget_q = act_pred_f.log_prob(a_f.detach())[mask_f > 0].mean()
         else:
-            err_f = ((act_pred_f - a_f.detach()) ** 2 * mask_f.unsqueeze(-1)).mean(
-                dim=-1
-            )
-            loss_forget_q = -((err_f * mask_f).sum() / mask_f.sum().clamp_min(1.0))
+            err_f = (act_pred_f - a_f.detach()) ** 2
+            loss_forget_q = -self._masked_token_mean(err_f, mask_f)
  
-        forget_total = loss_forget_cost + loss_forget_q
+        forget_total = cost_forget_scale * loss_forget_cost + loss_forget_q
  
         # ── PCGrad + Fisher + adaptive eta ────────────────────────────────────
         # CDT is a single transformer — use .backward()/.grad instead of
@@ -413,21 +449,16 @@ class CDTTrainerWithUnlearn(CDTTrainer):
         g_keep, g_forget = _normalise_and_pcgrad(self, g_keep, g_forget)
         g_forget_scaled = _fisher_scale_forget(self, params, g_keep, g_forget)
  
-        # Adaptive eta: gap = (cost-class-1 confidence on forget) - target.
-        # When the model already predicts high cost on forget states (good),
-        # class-1 prob is high → gap > 0 → _update_eta sees positive gap and
-        # reduces eta via sigmoid saturation.
-        if self._forget_cost_target is None:
-            self._forget_cost_target = 0.7  # target 70% class-1 confidence
-        cost1_conf = float(
-            cost_pred_f.reshape(-1, 2)[:, 1]
+        # Increase eta while confidence in the unsafe class is below target.
+        unsafe_cost_conf = float(
+            cost_pred_f_flat[:, unsafe_cost_class]
             .exp()[mask_f.flatten() > 0]
             .mean()
             .detach()
             .cpu()
         )
-        gap = cost1_conf - self._forget_cost_target
-        eta_forget = _update_eta(self, gap)
+        gap = hp.cdt_forget_cost_confidence_target - unsafe_cost_conf
+        eta_forget = _effective_eta(self, gap, hp.eta_mode, hp.eta_fixed)
  
         for p, gk, gf in zip(params, g_keep, g_forget_scaled):
             p.grad = gk + eta_forget * gf
@@ -451,13 +482,18 @@ class CDTTrainerWithUnlearn(CDTTrainer):
  
         return {
             "eta_forget": eta_forget,
+            "eta_effective": eta_forget,
+            "cost_forget_scale": cost_forget_scale,
             "loss_keep": float(loss_keep.detach().cpu()),
             "loss_act_keep": float(act_loss_k.detach().cpu()),
             "loss_cost_keep": float(cost_loss_k.detach().cpu()),
             "loss_state_keep": float(state_loss_k.detach().cpu()),
             "loss_forget_cost": float(loss_forget_cost.detach().cpu()),
             "loss_forget_q": float(loss_forget_q.detach().cpu()),
-            "cost1_conf_f": cost1_conf,
+            "unsafe_cost_class": unsafe_cost_class,
+            "unsafe_cost_conf_f": unsafe_cost_conf,
+            "cost1_conf_f": float(cost_pred_f_flat[:, 1].exp()[mask_f.flatten() > 0]
+                                   .mean().detach().cpu()),
             "gn_keep": float(self._gn_ema["keep"]),
             "gn_forget": float(self._gn_ema["forget"]),
         }
@@ -467,13 +503,13 @@ class CDTTrainerWithUnlearn(CDTTrainer):
 
 
 class COptiDICETrainerWithUnlearn(COptiDICETrainer):
-    """COptiDICE unlearning following CPQ's actor-update design.
+    """Native retained-data distribution learning with likelihood forgetting.
 
-    nu/chi networks serve as value/cost proxies:
-      keep:         nu-weighted actor loss (standard COptiDICE actor objective)
-      forget cost:  chi_f as Qc proxy — push > qc_thres + margin (CPQ formula)
-      forget q:     nu_f weighted by w_f — value signal on forget states
-    Adaptive eta uses (chi_f − target) as the gap signal.
+    Nu and chi are state-only networks, not action-sensitive Q critics. The
+    forget actor lowers supplied-action likelihood using native occupancy
+    weights and a nonnegative, normalized chi importance proxy. Adaptive eta
+    uses occupancy-ratio excess over its dimensionless configured target.
+    Neither proxy is an environment-cost estimate or an erasure guarantee.
     """
 
     def trajdeleter_unlearn_one_step(
@@ -481,27 +517,37 @@ class COptiDICETrainerWithUnlearn(COptiDICETrainer):
         batch_forget,
         batch_keep,
         *,
-        lambda_cost=1.0,
-        alpha_pg_keep=1.0,
+        alpha_pg_keep=None,
         update_targets=False,
-        max_grad_norm=1.0,
+        max_grad_norm=None,
         use_policy_gradient=True,
         unlearn_method="safe",
+        cost_forget_scale=None,
+        eta_mode=None,
+        eta_fixed=None,
         **kwargs,
     ):
         device = self.device
-        _init_unlearn_state(self)
+        if "lambda_cost" in kwargs:
+            raise TypeError("Use cost_forget_scale instead of lambda_cost")
+        hp = resolve_unlearn_hyperparameters(
+            self, alpha_pg_keep=alpha_pg_keep, max_grad_norm=max_grad_norm,
+            cost_forget_scale=cost_forget_scale, eta_mode=eta_mode,
+            eta_fixed=eta_fixed)
+        alpha_pg_keep, max_grad_norm = hp.alpha_pg_keep, hp.max_grad_norm
+        cost_forget_scale = 0.0 if unlearn_method == "reward-only" else hp.cost_forget_scale
+        _init_unlearn_state(self, hp)
 
         def _unpack(batch):
             obs, next_obs, act, rew, cost, done, is_init = batch
             return (
-                obs.to(device),
-                next_obs.to(device),
-                act.to(device),
-                rew.to(device),
-                cost.to(device),
-                done.to(device),
-                is_init.to(device),
+                obs.to(device=device, dtype=torch.float32),
+                next_obs.to(device=device, dtype=torch.float32),
+                act.to(device=device, dtype=torch.float32),
+                rew.to(device=device, dtype=torch.float32),
+                cost.to(device=device, dtype=torch.float32),
+                done.to(device=device, dtype=torch.float32),
+                is_init.to(device=device, dtype=torch.float32),
             )
 
         obs_f, next_obs_f, act_f, rew_f, cost_f, done_f, init_f = _unpack(batch_forget)
@@ -520,8 +566,8 @@ class COptiDICETrainerWithUnlearn(COptiDICETrainer):
         for p in self.model.chi_network.parameters():
             p.requires_grad = True
 
-        if unlearn_method == "safe":
-            self.model._lmbda = F.softplus(self.model.lmbda)
+        self.model._lmbda = F.softplus(self.model.lmbda)
+        if unlearn_method in ("safe", "reward-only"):
             nu_s_k, _ = self.model.nu_network.predict(obs_k, None)
             nu_s_nk, _ = self.model.nu_network.predict(next_obs_k, None)
             e_nu_lam_k = (
@@ -621,7 +667,7 @@ class COptiDICETrainerWithUnlearn(COptiDICETrainer):
         act_eps_k = torch.randn_like(act_k) * self.model.actions_std * 0.1
         _, _, dist_k = self.model.actor.forward(obs_k + obs_eps_k, False, True, True)
         keep_actor_loss = -(w_k * dist_k.log_prob(act_k + act_eps_k).sum(-1)).mean()
-        keep_total = alpha_pg_keep * keep_actor_loss
+        keep_total = alpha_pg_keep * hp.keep_bc_weight * keep_actor_loss
 
         # ── FORGET ────────────────────────────────────────────────────────────
 
@@ -636,23 +682,21 @@ class COptiDICETrainerWithUnlearn(COptiDICETrainer):
             )
             w_f = F.relu(self.model.f_prime_inv_fn(e_f / self.model.alpha)).detach()
             chi_f, _ = self.model.chi_network.predict(obs_f, None)
-            # Normalise chi to a unit-scale weight so its magnitude doesn't
-            # swamp w_f; detach so it is a pure scalar coefficient.
-            chi_f_w = (chi_f / (chi_f.abs().mean() + 1e-6)).detach()
+            # Chi is an unconstrained state-only importance proxy. Negative
+            # values must not reverse the direction of likelihood forgetting.
+            chi_positive = chi_f.clamp_min(0)
+            chi_f_w = (chi_positive / (chi_positive.mean() + 1e-6)).detach()
  
         # Actor distribution on forget states — log_prob has grad_fn through actor.
         obs_eps_f = torch.randn_like(obs_f) * self.model.observations_std * 0.1
         _, _, dist_f = self.model.actor.forward(obs_f + obs_eps_f, False, True, True)
         logp_forget = dist_f.log_prob(act_f.detach()).sum(-1)  # [B], differentiable
  
-        qc_thres = float(self.model.qc_thres)
-        if self._forget_cost_target is None:
-            self._forget_cost_target = qc_thres + 0.5
- 
-        # Minimising pushes logp_forget down in proportion to chi / w_f weights.
+        # Minimising lowers logged-action likelihood; the chi weight is a
+        # nonnegative importance proxy, not Qc(s, a) or a trajectory cost.
         loss_forget_cost = (chi_f_w.squeeze() * logp_forget).mean()
         loss_forget_q = (w_f.squeeze() * logp_forget).mean()
-        forget_total = loss_forget_cost + loss_forget_q
+        forget_total = cost_forget_scale * loss_forget_cost + loss_forget_q
  
         # ── PCGrad + Fisher + adaptive eta ────────────────────────────────────
         g_keep = torch.autograd.grad(
@@ -664,8 +708,8 @@ class COptiDICETrainerWithUnlearn(COptiDICETrainer):
         g_keep, g_forget = _normalise_and_pcgrad(self, g_keep, g_forget)
         g_forget_scaled = _fisher_scale_forget(self, actor_params, g_keep, g_forget)
 
-        gap = float((self._forget_cost_target - chi_f.mean()).detach().cpu())
-        eta_forget = _update_eta(self, gap)
+        gap = float(w_f.mean().detach().cpu()) - hp.coptidice_forget_weight_target
+        eta_forget = _effective_eta(self, gap, hp.eta_mode, hp.eta_fixed)
 
         _actor_step(
             self, actor_params, g_keep, g_forget_scaled, eta_forget, max_grad_norm
@@ -677,6 +721,10 @@ class COptiDICETrainerWithUnlearn(COptiDICETrainer):
 
         return {
             "eta_forget": eta_forget,
+            "eta_effective": eta_forget,
+            "cost_forget_scale": cost_forget_scale,
+            "forget_occupancy_gap": gap,
+            "forget_occupancy_target": hp.coptidice_forget_weight_target,
             "loss_nu": float(loss_nu.detach().cpu()),
             "loss_chi": float(loss_chi.detach().cpu()),
             "loss_lmbda": float(loss_lmbda.detach().cpu()),
@@ -702,7 +750,7 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
       - Bootstrap: actor_old(rep, vae.decode(rep)) + K-sample max
       - Predict API: (q1, q2, q1_list, q2_list) — both heads used for Huber
       - Cost backup: no (1-done) factor (BCQL convention)
-    Actor: identical CPQ forget design (cq_f > target softplus + q_f.mean()).
+    Actor: avoid actions with high predicted cost and maximize safe reward Q.
     """
 
     def trajdeleter_unlearn_one_step(
@@ -710,21 +758,36 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
         batch_forget,
         batch_keep,
         *,
-        lambda_cost=1.0,
-        alpha_q_keep=1.0,
-        alpha_q_forget=0.1,
-        alpha_cq_keep=1.0,
-        alpha_cq_forget=0.1,
-        alpha_pg_keep=1.0,
+        alpha_q_keep=None,
+        alpha_q_forget=None,
+        alpha_cq_keep=None,
+        alpha_cq_forget=None,
+        alpha_pg_keep=None,
         update_targets=True,
-        max_grad_norm=1.0,
+        max_grad_norm=None,
         use_policy_gradient=True,
         unlearn_method="safe",
+        cost_forget_scale=None,
+        eta_mode=None,
+        eta_fixed=None,
         K=None,
         **kwargs,
     ):
         device = self.device
-        _init_unlearn_state(self)
+        if "lambda_cost" in kwargs:
+            raise TypeError("Use cost_forget_scale instead of lambda_cost")
+        hp = resolve_unlearn_hyperparameters(self, alpha_q_keep=alpha_q_keep,
+            alpha_q_forget=alpha_q_forget, alpha_cq_keep=alpha_cq_keep,
+            alpha_cq_forget=alpha_cq_forget, alpha_pg_keep=alpha_pg_keep,
+            max_grad_norm=max_grad_norm, cost_forget_scale=cost_forget_scale,
+            eta_mode=eta_mode, eta_fixed=eta_fixed)
+        alpha_q_keep, alpha_q_forget = hp.alpha_q_keep, hp.alpha_q_forget
+        alpha_cq_keep, alpha_cq_forget = hp.alpha_cq_keep, hp.alpha_cq_forget
+        alpha_pg_keep, max_grad_norm = hp.alpha_pg_keep, hp.max_grad_norm
+        cost_forget_scale, eta_mode, eta_fixed = hp.cost_forget_scale, hp.eta_mode, hp.eta_fixed
+        if unlearn_method == "reward-only":
+            cost_forget_scale = 0.0
+        _init_unlearn_state(self, hp)
 
         qc_thres = float(self.model.qc_thres)
         K_val = K or self.model.sample_action_num
@@ -754,7 +817,7 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
         for p in self.model.cost_critic.parameters():
             p.requires_grad = True
 
-        if unlearn_method == "safe":
+        if unlearn_method in ("safe", "reward-only"):
             # ── Reward critic ─────────────────────────────────────────────────
             _, _, q1lk, q2lk = self.model.critic.predict(obs_k, act_k)
             _, _, q1lf, q2lf = self.model.critic.predict(obs_f, act_f)
@@ -783,13 +846,13 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
                 )
                 gate = (cq_next <= qc_thres).float()
                 backup_r_k = rew_k + self.model.gamma * (1 - done_k) * gate * q_next
-                tau_r = torch.quantile(backup_r_k, 0.30)
+                tau_r = torch.quantile(backup_r_k, hp.reward_forget_quantile)
                 q_ref_f = torch.full_like(backup_r_k, tau_r.item())
 
             loss_q_keep = (
                 _multihead_huber(backup_r_k, q1lk) + _multihead_huber(backup_r_k, q2lk)
             ) * 0.5
-            lqf = sum(F.softplus((q - q_ref_f) / 0.5).mean() for q in q1lf + q2lf)
+            lqf = sum(F.softplus((q - q_ref_f) / hp.reward_forget_temperature).mean() for q in q1lf + q2lf)
             loss_q_forget = lqf / len(q1lf + q2lf)
 
             self.model.critic_optim.zero_grad(set_to_none=True)
@@ -816,19 +879,19 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
                 )
                 # BCQL: no (1-done) in cost backup
                 backup_c_k = cost_k + self.model.gamma * cq_targ_k
-                cq_ref_f = torch.full_like(backup_c_k, qc_thres + 0.5)
+                cq_ref_f = torch.full_like(backup_c_k, qc_thres + hp.forget_cost_margin)
 
             loss_cq_keep = (
                 _multihead_huber(backup_c_k, cq1lk)
                 + _multihead_huber(backup_c_k, cq2lk)
             ) * 0.5
-            lcf = sum(F.softplus((cq_ref_f - cq) / 0.25).mean() for cq in cq1lf + cq2lf)
+            lcf = sum(F.softplus((cq_ref_f - cq) / hp.cost_forget_temperature).mean() for cq in cq1lf + cq2lf)
             loss_cq_forget = lcf / len(cq1lf + cq2lf)
 
             self.model.cost_critic_optim.zero_grad(set_to_none=True)
             (
                 alpha_cq_keep * loss_cq_keep
-                + alpha_cq_forget * lambda_cost * loss_cq_forget
+                + alpha_cq_forget * cost_forget_scale * loss_cq_forget
             ).backward()
             if max_grad_norm > 0:
                 torch.nn.utils.clip_grad_norm_(
@@ -877,15 +940,14 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
         loss_cost_keep = F.softplus(cq_k - qc_thres).mean()
         loss_bc_keep = F.mse_loss(act_k_pi, act_k.detach())
         keep_total = (
-            alpha_pg_keep * loss_keep + 1.0 * loss_cost_keep + 1.0 * loss_bc_keep
+            alpha_pg_keep * loss_keep + hp.keep_cost_weight * loss_cost_keep
+            + hp.keep_bc_weight * loss_bc_keep
         )
 
-        # ── FORGET (CPQ exact design) ─────────────────────────────────────────
-        if self._forget_cost_target is None:
-            self._forget_cost_target = qc_thres + 0.5
-        loss_forget_cost = F.softplus((self._forget_cost_target - cq_f) / 0.25).mean()
-        loss_forget_q = q_f.mean()
-        forget_total = loss_forget_cost + loss_forget_q
+        # ── FORGET ───────────────────────────────────────────────────────────
+        forget_total, loss_forget_q, loss_forget_cost = _forget_actor_objective(
+            q_f, cq_f, qc_thres, cost_forget_scale,
+            temperature=hp.cost_forget_temperature)
 
         # ── PCGrad + Fisher + adaptive eta ────────────────────────────────────
         g_keep = torch.autograd.grad(
@@ -897,8 +959,8 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
         g_keep, g_forget = _normalise_and_pcgrad(self, g_keep, g_forget)
         g_forget_scaled = _fisher_scale_forget(self, actor_params, g_keep, g_forget)
 
-        gap = float((self._forget_cost_target - cq_f.mean()).detach().cpu())
-        eta_forget = _update_eta(self, gap)
+        gap = float((cq_f.mean() - qc_thres).detach().cpu())
+        eta_forget = _effective_eta(self, gap, eta_mode, eta_fixed)
 
         _actor_step(
             self, actor_params, g_keep, g_forget_scaled, eta_forget, max_grad_norm
@@ -926,6 +988,9 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
 
         return {
             "eta_forget": eta_forget,
+            "eta_effective": eta_forget,
+            "cost_forget_scale": cost_forget_scale,
+            "safe_threshold": qc_thres,
             "loss_q_keep": float(loss_q_keep.detach().cpu()),
             "loss_q_forget": float(loss_q_forget.detach().cpu()),
             "loss_cq_keep": float(loss_cq_keep.detach().cpu()),
@@ -948,14 +1013,14 @@ class BCQLTrainerWithUnlearn(BCQLTrainer):
 
 
 class BEARLTrainerWithUnlearn(BEARLTrainer):
-    """BEARL unlearning following CPQ's critic and actor design.
+    """BEARL unlearning with shared controls and its native MMD support loss.
 
     Critic differences vs CPQ/BCQL:
       - Bootstrap: actor_old(rep, False, True, False) + K-sample max
-      - Cost backup: includes (1-done) factor (BEARL convention)
+      - Retains this adapter's existing (1-done) cost-backup mask
     Actor differences:
       - Keep: CPQ gate + BEARL MMD support constraint + cost penalty
-      - Forget: actor(obs, False, True, False) — same CPQ forget formulas
+      - Forget: maximize safe reward and avoid high predicted cost
       - log_alpha updated after actor step (BEARL convention)
     """
 
@@ -964,30 +1029,44 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
         batch_forget,
         batch_keep,
         *,
-        lambda_cost=1.0,
-        alpha_q_keep=1.0,
-        alpha_q_forget=0.1,
-        alpha_cq_keep=1.0,
-        alpha_cq_forget=0.1,
-        alpha_pg_keep=1.0,
+        alpha_q_keep=None,
+        alpha_q_forget=None,
+        alpha_cq_keep=None,
+        alpha_cq_forget=None,
+        alpha_pg_keep=None,
         update_targets=True,
-        max_grad_norm=1.0,
+        max_grad_norm=None,
         use_policy_gradient=True,
         unlearn_method="safe",
+        cost_forget_scale=None,
+        eta_mode=None,
+        eta_fixed=None,
         K=None,
         **kwargs,
     ):
         device = self.device
-        _init_unlearn_state(self)
+        if "lambda_cost" in kwargs:
+            raise TypeError("Use cost_forget_scale instead of lambda_cost")
+        hp = resolve_unlearn_hyperparameters(
+            self, alpha_q_keep=alpha_q_keep, alpha_q_forget=alpha_q_forget,
+            alpha_cq_keep=alpha_cq_keep, alpha_cq_forget=alpha_cq_forget,
+            alpha_pg_keep=alpha_pg_keep, max_grad_norm=max_grad_norm,
+            cost_forget_scale=cost_forget_scale, eta_mode=eta_mode,
+            eta_fixed=eta_fixed)
+        alpha_q_keep, alpha_q_forget = hp.alpha_q_keep, hp.alpha_q_forget
+        alpha_cq_keep, alpha_cq_forget = hp.alpha_cq_keep, hp.alpha_cq_forget
+        alpha_pg_keep, max_grad_norm = hp.alpha_pg_keep, hp.max_grad_norm
+        cost_forget_scale = 0.0 if unlearn_method == "reward-only" else hp.cost_forget_scale
+        _init_unlearn_state(self, hp)
 
         qc_thres = float(self.model.qc_thres)
         K_val = K or self.model.sample_action_num
 
         obs_f, next_obs_f, act_f, rew_f, cost_f, done_f = [
-            b.to(device) for b in batch_forget
+            b.to(device=device, dtype=torch.float32) for b in batch_forget
         ]
         obs_k, next_obs_k, act_k, rew_k, cost_k, done_k = [
-            b.to(device) for b in batch_keep
+            b.to(device=device, dtype=torch.float32) for b in batch_keep
         ]
         Bk = obs_k.shape[0]
 
@@ -1008,7 +1087,7 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
         for p in self.model.cost_critic.parameters():
             p.requires_grad = True
 
-        if unlearn_method == "safe":
+        if unlearn_method in ("safe", "reward-only"):
             # ── Reward critic ─────────────────────────────────────────────────
             _, _, q1lk, q2lk = self.model.critic.predict(obs_k, act_k)
             _, _, q1lf, q2lf = self.model.critic.predict(obs_f, act_f)
@@ -1037,13 +1116,14 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
                 )
                 gate = (cq_next <= qc_thres).float()
                 backup_r_k = rew_k + self.model.gamma * (1 - done_k) * gate * q_next
-                tau_r = torch.quantile(backup_r_k, 0.30)
+                tau_r = torch.quantile(backup_r_k, hp.reward_forget_quantile)
                 q_ref_f = torch.full_like(backup_r_k, tau_r.item())
 
             loss_q_keep = (
                 _multihead_huber(backup_r_k, q1lk) + _multihead_huber(backup_r_k, q2lk)
             ) * 0.5
-            lqf = sum(F.softplus((q - q_ref_f) / 0.5).mean() for q in q1lf + q2lf)
+            lqf = sum(F.softplus((q - q_ref_f) / hp.reward_forget_temperature).mean()
+                      for q in q1lf + q2lf)
             loss_q_forget = lqf / len(q1lf + q2lf)
 
             self.model.critic_optim.zero_grad(set_to_none=True)
@@ -1068,21 +1148,22 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
                     .reshape(Bk, K_val)
                     .max(1)[0]
                 )
-                # BEARL: cost backup includes (1-done)
+                # Preserve the existing adapter's terminal-masked backup.
                 backup_c_k = cost_k + self.model.gamma * (1 - done_k) * cq_targ_k
-                cq_ref_f = torch.full_like(backup_c_k, qc_thres + 0.5)
+                cq_ref_f = torch.full_like(backup_c_k, qc_thres + hp.forget_cost_margin)
 
             loss_cq_keep = (
                 _multihead_huber(backup_c_k, cq1lk)
                 + _multihead_huber(backup_c_k, cq2lk)
             ) * 0.5
-            lcf = sum(F.softplus((cq_ref_f - cq) / 0.25).mean() for cq in cq1lf + cq2lf)
+            lcf = sum(F.softplus((cq_ref_f - cq) / hp.cost_forget_temperature).mean()
+                      for cq in cq1lf + cq2lf)
             loss_cq_forget = lcf / len(cq1lf + cq2lf)
 
             self.model.cost_critic_optim.zero_grad(set_to_none=True)
             (
                 alpha_cq_keep * loss_cq_keep
-                + alpha_cq_forget * lambda_cost * loss_cq_forget
+                + alpha_cq_forget * cost_forget_scale * loss_cq_forget
             ).backward()
             if max_grad_norm > 0:
                 torch.nn.utils.clip_grad_norm_(
@@ -1141,20 +1222,19 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
             self.model.log_alpha.exp() * (mmd_k - self.model.target_mmd_thresh).mean()
         )
         loss_cost_keep = F.softplus(cq_k - qc_thres).mean()
-        keep_total = alpha_pg_keep * loss_keep + mmd_keep + 1.0 * loss_cost_keep
+        keep_total = (alpha_pg_keep * loss_keep + hp.keep_bc_weight * mmd_keep
+                      + hp.keep_cost_weight * loss_cost_keep)
 
-        # ── FORGET (CPQ exact design) ─────────────────────────────────────────
+        # ── FORGET: choose safe, rewarding policy actions ─────────────────────
         act_f_pi, _ = self.model.actor(obs_f, False, True, False)
         q1f, q2f, _, _ = self.model.critic.predict(obs_f, act_f_pi)
         cq1f, cq2f, _, _ = self.model.cost_critic.predict(obs_f, act_f_pi)
         q_f = torch.min(q1f, q2f)
         cq_f = torch.min(cq1f, cq2f)
 
-        if self._forget_cost_target is None:
-            self._forget_cost_target = qc_thres + 0.5
-        loss_forget_cost = F.softplus((self._forget_cost_target - cq_f) / 0.25).mean()
-        loss_forget_q = q_f.mean()
-        forget_total = loss_forget_cost + loss_forget_q
+        forget_total, loss_forget_q, loss_forget_cost = _forget_actor_objective(
+            q_f, cq_f, qc_thres, cost_forget_scale,
+            temperature=hp.cost_forget_temperature)
 
         # ── PCGrad + Fisher + adaptive eta ────────────────────────────────────
         g_keep = torch.autograd.grad(
@@ -1166,20 +1246,19 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
         g_keep, g_forget = _normalise_and_pcgrad(self, g_keep, g_forget)
         g_forget_scaled = _fisher_scale_forget(self, actor_params, g_keep, g_forget)
 
-        gap = float((self._forget_cost_target - cq_f.mean()).detach().cpu())
-        eta_forget = _update_eta(self, gap)
+        gap = float((cq_f.mean() - qc_thres).detach().cpu())
+        eta_forget = _effective_eta(self, gap, hp.eta_mode, hp.eta_fixed)
 
         _actor_step(
             self, actor_params, g_keep, g_forget_scaled, eta_forget, max_grad_norm
         )
 
         # BEARL log_alpha update (after actor step — BEARL convention)
-        self.model.log_alpha += (
-            self.model.alpha_lr
-            * self.model.log_alpha.exp()
-            * (mmd_k - self.model.target_mmd_thresh).mean().detach()
-        )
-        self.model.log_alpha.data.clamp_(-5.0, 5.0)
+        with torch.no_grad():
+            self.model.log_alpha.add_(
+                self.model.alpha_lr * self.model.log_alpha.exp()
+                * (mmd_k - self.model.target_mmd_thresh).mean())
+            self.model.log_alpha.clamp_(-5.0, 5.0)
         self.model.n_train_steps += 1
 
         for m in (
@@ -1204,6 +1283,9 @@ class BEARLTrainerWithUnlearn(BEARLTrainer):
 
         return {
             "eta_forget": eta_forget,
+            "eta_effective": eta_forget,
+            "cost_forget_scale": cost_forget_scale,
+            "safe_threshold": qc_thres,
             "loss_q_keep": float(loss_q_keep.detach().cpu()),
             "loss_q_forget": float(loss_q_forget.detach().cpu()),
             "loss_cq_keep": float(loss_cq_keep.detach().cpu()),
@@ -1233,29 +1315,44 @@ class CPQTrainerWithUnlearn(CPQTrainer):
         batch_forget,
         batch_keep,
         *,
-        alpha_q_keep=1.0,
-        alpha_q_forget=0.1,
-        alpha_cq_keep=1.0,
-        alpha_cq_forget=0.1,
-        alpha_pg_keep=1.0,
+        alpha_q_keep=None,
+        alpha_q_forget=None,
+        alpha_cq_keep=None,
+        alpha_cq_forget=None,
+        alpha_pg_keep=None,
         update_targets=True,
-        max_grad_norm=1.0,
+        max_grad_norm=None,
         use_policy_gradient=True,
         unlearn_step=0,
         unlearn_method="safe",
+        cost_forget_scale=None,
+        eta_mode=None,
+        eta_fixed=None,
         **kwargs,
     ):
         device = self.device
-        _init_unlearn_state(self)
+        if "lambda_cost" in kwargs:
+            raise TypeError("CPQ does not use lambda_cost; use cost_forget_scale")
+        hp = resolve_unlearn_hyperparameters(self, alpha_q_keep=alpha_q_keep,
+            alpha_q_forget=alpha_q_forget, alpha_cq_keep=alpha_cq_keep,
+            alpha_cq_forget=alpha_cq_forget, alpha_pg_keep=alpha_pg_keep,
+            max_grad_norm=max_grad_norm, cost_forget_scale=cost_forget_scale,
+            eta_mode=eta_mode, eta_fixed=eta_fixed)
+        alpha_q_keep, alpha_q_forget = hp.alpha_q_keep, hp.alpha_q_forget
+        alpha_cq_keep, alpha_cq_forget = hp.alpha_cq_keep, hp.alpha_cq_forget
+        alpha_pg_keep, max_grad_norm = hp.alpha_pg_keep, hp.max_grad_norm
+        cost_forget_scale, eta_mode, eta_fixed = hp.cost_forget_scale, hp.eta_mode, hp.eta_fixed
+        if unlearn_method == "reward-only":
+            cost_forget_scale = 0.0
+        _init_unlearn_state(self, hp)
 
         obs_f, _, act_f, _, cost_f, done_f = [b.to(device) for b in batch_forget]
         obs_k, next_obs_k, act_k, rew_k, cost_k, done_k = [
             b.to(device) for b in batch_keep
         ]
 
-        qc_thres = float(
-            getattr(self.model, "qc_thres", getattr(self.model, "q_thres"))
-        )
+        qc_thres = float(getattr(self.model, "qc_thres", self.model.q_thres))
+        safe_threshold = float(self.model.q_thres)
 
         z = lambda: torch.tensor(0.0, device=device)
         loss_q_keep = loss_q_forget = loss_cq_keep = loss_cq_forget = z()
@@ -1263,7 +1360,7 @@ class CPQTrainerWithUnlearn(CPQTrainer):
         loss_forget_cost = loss_forget_q = z()
 
         if self._forget_cost_target is None:
-            self._forget_cost_target = qc_thres + 0.5
+            self._forget_cost_target = qc_thres + hp.forget_cost_margin
 
         # ════════════════════════════════════════════════════════════════════
         # 1) Critics
@@ -1277,7 +1374,7 @@ class CPQTrainerWithUnlearn(CPQTrainer):
         for p in self.model.cost_critic.parameters():
             p.requires_grad = True
 
-        if unlearn_method == "safe":
+        if unlearn_method in ("safe", "reward-only"):
             # ── Reward critic ─────────────────────────────────────────────────
             _, q_list_k = self.model.critic.predict(obs_k, act_k)
             _, q_list_f = self.model.critic.predict(obs_f, act_f)
@@ -1292,14 +1389,14 @@ class CPQTrainerWithUnlearn(CPQTrainer):
                     rew_k
                     + self.model.gamma
                     * (1 - done_k)
-                    * (qc_targ_k <= qc_thres)
+                    * (qc_targ_k <= safe_threshold)
                     * q_targ_k
                 )
-                tau_r = torch.quantile(backup_r_k, 0.30)
+                tau_r = torch.quantile(backup_r_k, hp.reward_forget_quantile)
                 q_ref_f = torch.full_like(backup_r_k, tau_r.item())
 
             loss_q_keep = _multihead_huber(backup_r_k, q_list_k)
-            lqf = sum(F.softplus((q - q_ref_f) / 0.5).mean() for q in q_list_f)
+            lqf = sum(F.softplus((q - q_ref_f) / hp.reward_forget_temperature).mean() for q in q_list_f)
             loss_q_forget = lqf / len(q_list_f)
 
             self.model.critic_optim.zero_grad(set_to_none=True)
@@ -1320,11 +1417,12 @@ class CPQTrainerWithUnlearn(CPQTrainer):
                 cq_ref_f = torch.full_like(backup_c_k, self._forget_cost_target)
 
             loss_cq_keep = _multihead_huber(backup_c_k, cq_k_list)
-            lcf = sum(F.softplus((cq_ref_f - cq) / 0.25).mean() for cq in cq_f_list)
+            lcf = sum(F.softplus((cq_ref_f - cq) / hp.cost_forget_temperature).mean() for cq in cq_f_list)
             loss_cq_forget = lcf / len(cq_f_list)
 
             self.model.cost_critic_optim.zero_grad(set_to_none=True)
-            (alpha_cq_keep * loss_cq_keep +  alpha_cq_forget * loss_cq_forget).backward()
+            (alpha_cq_keep * loss_cq_keep + alpha_cq_forget
+             * cost_forget_scale * loss_cq_forget).backward()
             if max_grad_norm > 0:
                 torch.nn.utils.clip_grad_norm_(
                     self.model.cost_critic.parameters(), max_grad_norm
@@ -1358,25 +1456,23 @@ class CPQTrainerWithUnlearn(CPQTrainer):
         cq_f, _ = self.model.cost_critic.predict(obs_f, act_f_pi)
 
         # ── KEEP ─────────────────────────────────────────────────────────────
-        loss_keep = -((cq_k <= qc_thres) * q_k).mean()
-        loss_cost_keep = F.softplus(cq_k - qc_thres).mean()
+        loss_keep = -((cq_k <= safe_threshold) * q_k).mean()
+        loss_cost_keep = F.softplus(cq_k - safe_threshold).mean()
         loss_bc_keep = F.mse_loss(act_k_pi, act_k.detach())
-      
+        # A confidence weight must not reward increasing cost to disable BC.
+        bc_weight = (safe_threshold - cq_k).clamp(min=0).mean().detach()
 
         keep_total = (
             alpha_pg_keep* loss_keep 
-            + 1.0 * loss_cost_keep 
-            + 1.0 * loss_bc_keep * (qc_thres - cq_k).clamp(min=0).mean()  # BC only on "safe" states
+            + hp.keep_cost_weight * loss_cost_keep
+            + hp.keep_bc_weight * loss_bc_keep * bc_weight
             # + 0.01                            * loss_bc_forget  * mask_forget
         )
         # ── FORGET ───────────────────────────────────────────────────────────
         
-        loss_forget_cost = F.softplus((self._forget_cost_target - cq_f) / 0.25).mean() 
-        loss_forget_q = ((cq_f >= (self._forget_cost_target)).float() * q_f).mean() 
-        # loss_forget_q =  q_f.mean() * 0.1
-        # loss_bc_forget = -F.mse_loss(act_f_pi, act_f.detach())
-
-        forget_total = (loss_forget_cost + loss_forget_q )
+        forget_total, loss_forget_q, loss_forget_cost = _forget_actor_objective(
+            q_f, cq_f, safe_threshold, cost_forget_scale,
+            temperature=hp.cost_forget_temperature)
 
         # ── PCGrad + Fisher + adaptive eta ────────────────────────────────────
         g_keep = torch.autograd.grad(
@@ -1388,8 +1484,8 @@ class CPQTrainerWithUnlearn(CPQTrainer):
         g_keep, g_forget = _normalise_and_pcgrad(self, g_keep, g_forget)
         g_forget_scaled = _fisher_scale_forget(self, actor_params, g_keep, g_forget)
 
-        gap = float((self._forget_cost_target - cq_f.mean()).detach().cpu())
-        eta_forget = _update_eta(self, gap)
+        gap = float((cq_f.mean() - safe_threshold).detach().cpu())
+        eta_forget = _effective_eta(self, gap, eta_mode, eta_fixed)
 
         _actor_step(
             self, actor_params, g_keep, g_forget_scaled, eta_forget, max_grad_norm
@@ -1419,6 +1515,9 @@ class CPQTrainerWithUnlearn(CPQTrainer):
 
         return {
             "eta_forget": eta_forget,
+            "eta_effective": eta_forget,
+            "cost_forget_scale": cost_forget_scale,
+            "safe_threshold": safe_threshold,
             "loss_q_keep": float(loss_q_keep.detach().cpu()),
             "loss_q_forget": float(loss_q_forget.detach().cpu()),
             "loss_cq_keep": float(loss_cq_keep.detach().cpu()),

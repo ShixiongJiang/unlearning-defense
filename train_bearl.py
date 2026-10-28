@@ -108,6 +108,14 @@ def train(args: BEARLTrainConfig):
         episode_len=args.episode_len,
         device=args.device,
     )
+    if args.resume_path is not None:
+        if not os.path.isfile(args.resume_path):
+            raise FileNotFoundError(f"Warm-start checkpoint not found: {args.resume_path}")
+        checkpoint = torch.load(args.resume_path, map_location=args.device)
+        if "model_state" not in checkpoint:
+            raise KeyError(f"Checkpoint has no model_state: {args.resume_path}")
+        model.load_state_dict(checkpoint["model_state"])
+        print(f"Warm-started BEARL from {args.resume_path}")
     print(f"Total parameters: {sum(p.numel() for p in model.parameters())}")
 
     def checkpoint_fn():
@@ -142,6 +150,22 @@ def train(args: BEARLTrainConfig):
     best_reward = -np.inf
     best_cost = np.inf
     best_idx = 0
+    if args.resume_path is not None:
+        # Evaluate and preserve the source policy before any fine-tuning update.
+        # This prevents a worse first evaluation from replacing it as model_best.
+        ret, cost, length = trainer.evaluate(args.eval_episodes)
+        best_reward, best_cost, best_idx = ret, cost, -1
+        logger.store(tab="eval", Cost=cost, Reward=ret, Length=length)
+        logger.save_checkpoint(suffix="best")
+        logger.store(tab="train", best_idx=best_idx)
+        logger.write(0, display=False)
+        print(f"Warm-start evaluation: cost={cost:.4f}, reward={ret:.4f}")
+        if args.target_cost is not None and cost <= args.target_cost:
+            print(
+                f"Target cost reached by warm-start policy: {cost:.4f} <= "
+                f"{args.target_cost:.4f}."
+            )
+            return
 
     # training
     for step in trange(args.update_steps, desc="Training"):
@@ -168,6 +192,13 @@ def train(args: BEARLTrainConfig):
 
             logger.store(tab="train", best_idx=best_idx)
             logger.write(step, display=False)
+
+            if args.target_cost is not None and cost <= args.target_cost:
+                print(
+                    f"Target cost reached at update {step + 1}: {cost:.4f} <= "
+                    f"{args.target_cost:.4f}."
+                )
+                break
 
         else:
             logger.write_without_reset(step)

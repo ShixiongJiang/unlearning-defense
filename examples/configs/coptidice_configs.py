@@ -31,11 +31,19 @@ class COptiDICETrainConfig:
     actor_lr: float = 0.0001
     critic_lr: float = 0.0001
     scalar_lr: float = 0.0001
-    cost_limit: int = 10
+    # This is a trajectory-cost budget and may be fractional when calibrated
+    # to a per-transition safety constraint.
+    cost_limit: float = 10.0
     episode_len: int = 300
     batch_size: int = 512
     update_steps: int = 100_000
     num_workers: int = 8
+    # optional warm-start fine-tuning controls
+    resume_path: Optional[str] = None
+    target_cost: Optional[float] = None
+    # Desired effective dual value (after softplus) for a warm-started run.
+    # ``None`` keeps the checkpoint/default initialization unchanged.
+    initial_lmbda: Optional[float] = None
     # model params
     a_hidden_sizes: List[float] = field(default=[256, 256], is_mutable=True)
     c_hidden_sizes: List[float] = field(default=[256, 256], is_mutable=True)

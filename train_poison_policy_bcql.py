@@ -123,7 +123,9 @@ def train_poison_policy(args: BCQLTrainConfig):
                           cost_scale=args.cost_scale,
                           device=args.device)
 
-    trainloader = DataLoader(TransitionDataset(data),
+    trainloader = DataLoader(TransitionDataset(data,
+                                              reward_scale=args.reward_scale,
+                                              cost_scale=args.cost_scale),
                              batch_size=args.batch_size, pin_memory=True, num_workers=args.num_workers)
     trainloader_iter = iter(trainloader)
 

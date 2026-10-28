@@ -1,0 +1,136 @@
+diff --git a/osrl/algorithms/coptidice.py b/osrl/algorithms/coptidice.py
+index 0ddd820..4c13ab7 100644
+--- a/osrl/algorithms/coptidice.py
++++ b/osrl/algorithms/coptidice.py
+@@ -80,7 +80,7 @@ class COptiDICE(nn.Module):
+                  cost_ub_epsilon: float = 0.01,
+                  num_nu: int = 1,
+                  num_chi: int = 1,
+-                 cost_limit: int = 10,
++                 cost_limit: float = 10.0,
+                  episode_len: int = 300,
+                  device: str = "cpu"):
+         super().__init__()
+@@ -100,8 +100,12 @@ class COptiDICE(nn.Module):
+ 
+         self.qc_thres = cost_limit * (1 - self.gamma**self.episode_len) / (
+             1 - self.gamma) / self.episode_len
+-        self.tau = torch.ones(1, requires_grad=True, device=self.device)
+-        self.lmbda = torch.ones(1, requires_grad=True, device=self.device)
++        # Register the two learned dual variables as parameters.  Previously
++        # they were plain tensors, so they were optimized but silently omitted
++        # from ``state_dict`` checkpoints.  That made a resumed safety run lose
++        # its learned cost penalty.
++        self.tau = nn.Parameter(torch.ones(1, device=self.device))
++        self.lmbda = nn.Parameter(torch.ones(1, device=self.device))
+         self.actor = SquashedGaussianMLPActor(self.state_dim, self.action_dim,
+                                               self.a_hidden_sizes,
+                                               nn.ReLU).to(self.device)
+diff --git a/osrl/algorithms/cpq.py b/osrl/algorithms/cpq.py
+index f1d42ca..398e0a4 100644
+--- a/osrl/algorithms/cpq.py
++++ b/osrl/algorithms/cpq.py
+@@ -1,4 +1,5 @@
+ from copy import deepcopy
++import warnings
+ 
+ import gymnasium as gym
+ import numpy as np
+@@ -35,6 +36,9 @@ class CPQ(nn.Module):
+         device (str): Device to run the model on (e.g. 'cpu' or 'cuda:0'). 
+     """
+ 
++    # Version 1 checkpoints did not include the manually updated alpha scalar.
++    _version = 2
++
+     def __init__(self,
+                  state_dim: int,
+                  action_dim: int,
+@@ -90,7 +94,9 @@ class CPQ(nn.Module):
+                                            self.c_hidden_sizes,
+                                            nn.ReLU,
+                                            num_q=self.num_qc).to(self.device)
+-        self.log_alpha = torch.tensor(0.0, device=self.device)
++        # Alpha uses its own manual update below, rather than an optimizer.
++        # A buffer persists its learned value and follows model.to(device).
++        self.register_buffer("log_alpha", torch.tensor(0.0, device=self.device))
+ 
+         self.actor_old = deepcopy(self.actor)
+         self.actor_old.eval()
+@@ -104,6 +110,25 @@ class CPQ(nn.Module):
+             1 - self.gamma) / self.episode_len
+         self.qc_thres = qc_scalar * self.q_thres
+ 
++    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
++                              missing_keys, unexpected_keys, error_msgs):
++        alpha_key = prefix + "log_alpha"
++        if alpha_key not in state_dict and local_metadata.get("version", 1) < 2:
++            # Old checkpoints cannot recover the learned scalar from weights.
++            # Keep their original constructor default explicit; callers with a
++            # documented external value may add it to state_dict before loading.
++            state_dict[alpha_key] = self.log_alpha.new_zeros(())
++            warnings.warn(
++                "Legacy CPQ checkpoint has no log_alpha state; initializing "
++                "log_alpha=0 (alpha=1). The learned alpha cannot be recovered "
++                "from network weights.",
++                RuntimeWarning,
++                stacklevel=3,
++            )
++        super()._load_from_state_dict(
++            state_dict, prefix, local_metadata, strict,
++            missing_keys, unexpected_keys, error_msgs)
++
+     def _soft_update(self, tgt: nn.Module, src: nn.Module, tau: float) -> None:
+         """
+         Softly update the parameters of target module 
+@@ -172,8 +197,6 @@ class CPQ(nn.Module):
+                                       1))  # [sample_action_num, batch_size, obs_dim]
+             stacked_obs = stacked_obs.reshape(self.sample_action_num * batch_size,
+                                               self.state_dim)
+-            qc_sampled, _ = self.cost_critic_old.predict(stacked_obs, sampled_actions)
+-            qc_sampled = qc_sampled.reshape(self.sample_action_num, batch_size)
+             # get latent mean and std
+             _, mean, std = self.vae(stacked_obs, sampled_actions)
+             mean = mean.reshape(self.sample_action_num, batch_size, self.latent_dim)
+@@ -181,7 +204,13 @@ class CPQ(nn.Module):
+             KL_loss = -0.5 * (1 + torch.log(std.pow(2)) - mean.pow(2) - std.pow(2)).mean(
+                 2)  # [sample_action_num, batch_size]
+             quantile = torch.quantile(KL_loss, 0.75)
+-            qc_ood = ((KL_loss >= quantile) * qc_sampled).mean(0)
++            ood_mask = KL_loss >= quantile
++
++        # Sampling and OOD membership stay fixed while the regularizer
++        # differentiates the online cost critic.
++        qc_sampled, _ = self.cost_critic.predict(stacked_obs, sampled_actions)
++        qc_sampled = qc_sampled.reshape(self.sample_action_num, batch_size)
++        qc_ood = (ood_mask * qc_sampled).mean(0)
+ 
+         loss_cost_critic = self.cost_critic.loss(
+             backup, qc_list) - self.log_alpha.exp() * (qc_ood.mean() - self.qc_thres)
+@@ -190,9 +219,10 @@ class CPQ(nn.Module):
+         self.cost_critic_optim.step()
+ 
+         # update alpha
+-        self.log_alpha += self.alpha_lr * self.log_alpha.exp() * (
+-            self.qc_thres - qc_ood.mean()).detach()
+-        self.log_alpha.data.clamp_(min=-5.0, max=5.0)
++        with torch.no_grad():
++            self.log_alpha.add_(self.alpha_lr * self.log_alpha.exp() * (
++                self.qc_thres - qc_ood.mean()))
++            self.log_alpha.clamp_(min=-5.0, max=5.0)
+ 
+         stats_cost_critic = {
+             "loss/cost_critic_loss": loss_cost_critic.item(),
+diff --git a/osrl/common/exp_util.py b/osrl/common/exp_util.py
+index aa877b7..305473c 100644
+--- a/osrl/common/exp_util.py
++++ b/osrl/common/exp_util.py
+@@ -68,7 +68,7 @@ def load_config_and_model(path: str, best: bool = False):
+             model_file = "model_best.pt"
+         model_path = osp.join(path, "checkpoint/" + model_file)
+         print(f"load model from {model_path}")
+-        model = torch.load(model_path)
++        model = torch.load(model_path, map_location="cpu")
+         return config, model
+     else:
+         raise ValueError(f"{path} doesn't exist!")

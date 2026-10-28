@@ -36,6 +36,9 @@ class BEARLTrainConfig:
     batch_size: int = 512
     update_steps: int = 100_000
     num_workers: int = 8
+    # optional warm-start fine-tuning controls
+    resume_path: Optional[str] = None
+    target_cost: Optional[float] = None
     # model params
     a_hidden_sizes: List[float] = field(default=[256, 256], is_mutable=True)
     c_hidden_sizes: List[float] = field(default=[256, 256], is_mutable=True)
